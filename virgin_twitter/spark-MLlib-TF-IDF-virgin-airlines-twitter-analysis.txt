@@ -1,0 +1,180 @@
+
+val tweets = spark.read.format("csv").option("header","true").option("quoteAll","true").load("virgin-twitter/virgin-tweets.csv")
+
+scala> tweets.printSchema
+root
+ |-- tweet_id: string (nullable = true)
+ |-- airline_sentiment: string (nullable = true)
+ |-- airline_sentiment_confidence: string (nullable = true)
+ |-- negativereason: string (nullable = true)
+ |-- negativereason_confidence: string (nullable = true)
+ |-- airline: string (nullable = true)
+ |-- airline_sentiment_gold: string (nullable = true)
+ |-- name: string (nullable = true)
+ |-- negativereason_gold: string (nullable = true)
+ |-- retweet_count: string (nullable = true)
+ |-- text: string (nullable = true)
+ |-- tweet_coord: string (nullable = true)
+ |-- tweet_created: string (nullable = true)
+ |-- tweet_location: string (nullable = true)
+ |-- user_timezone: string (nullable = true)
+ 
+val rdd1 = tweets.rdd.map( x => x.toSeq).map( x => x.toArray)
+
+rdd1.take(5)
+res3: Array[Array[Any]] = Array(Array(570306133677760513, neutral, 1.0, null, null, Virgin America, null, cairdin, null, 0, @VirginAmerica What @dhepburn said., null, 2015-02-24 11:35:52 -0800, null, Eastern Time (US & Canada)), Array(570301130888122368, positive, 0.3486, null, 0.0, Virgin America, null, jnardino, null, 0, @VirginAmerica plus you've added commercials to the experience... tacky., null, 2015-02-24 11:15:59 -0800, null, Pacific Time (US & Canada)), Array(570301083672813571, neutral, 0.6837, null, null, Virgin America, null, yvonnalynn, null, 0, @VirginAmerica I didn't today... Must mean I need to take another trip!, null, 2015-02-24 11:15:48 -0800, Lets Play, Central Time (US & Canada)), Array(570301031407624196, negative, 1.0, Bad Flight, 0.7033, Virgin America, null, jna...
+
+------------------ use this code to identify offenders
+
+import scala.util.Try
+
+rdd1.filter( x => {
+  ! Try { x(0).toString.toLong }.isSuccess
+ }).count
+ 
+------------------
+
+val categories = rdd1.map(x => x(1)).distinct.zipWithIndex.collect.toMap
+categories: scala.collection.immutable.Map[Any,Long] = Map(positive -> 0, negative -> 1, neutral -> 2)
+
+val rdd = rdd1.map( x => Array(x(10).toString,x(1).toString))
+
+-- remove nonword characters (such as punctuation).
+val nonWordSplit = rdd.flatMap(x => x(0).split("""\W+""").map(_.toLowerCase))
+nonWordSplit.sample(true, 0.3, 42).take(100).mkString(",")
+nonWordSplit.distinct.count  // 15058
+
+-- filter out numbers and tokens that are words mixed with numbers
+val regex = """[^0-9]*""".r
+val filterNumbers = nonWordSplit.filter(token => regex.pattern.matcher(token).matches)
+filterNumbers.distinct.sample(false, 0.3, 42).take(100).mkString("\n")
+filterNumbers.distinct.count  // 11898
+
+-- list highest occurrence of words to get an idea which stop words to be removed
+val tokenCounts = filterNumbers.map(t => (t, 1)).reduceByKey(_ + _)
+val orderingDesc = Ordering.by[(String, Int), Int](_._2)
+tokenCounts.top(20)(orderingDesc).mkString("\n")
+
+-- remove stop words
+val stopwords = Set(
+ "","the","a","an","of","or","in","for","by","on","but", "is", "not", "with", "as", "was", "if",
+ "they", "are", "this", "and", "it", "have", "from", "at", "my", "be", "that", "to"
+)
+val tokenCountsFilteredStopwords = tokenCounts.filter { case(k, v) => !stopwords.contains(k) }
+tokenCountsFilteredStopwords.top(20)(orderingDesc).mkString("\n")
+
+-- remove tokens with one-character length
+val tokenCountsFilteredSize = tokenCountsFilteredStopwords.filter { case (k, v) => k.size >= 2 }
+tokenCountsFilteredSize.top(20)(orderingDesc).mkString("\n")
+
+-- list terms with only one-occurrence
+val orderingAsc = Ordering.by[(String, Int), Int](-_._2)
+tokenCountsFilteredSize.top(20)(orderingAsc).mkString("\n")
+
+-- remove terms with only one-occurrence
+val rareTokens = tokenCounts.filter{ case (k, v) => v < 2 }.map{ case (k, v) => k }.collect.toSet
+val tokenCountsFilteredAll = tokenCountsFilteredSize.filter { case (k, v) => !rareTokens.contains(k) }
+tokenCountsFilteredAll.top(20)(orderingAsc).mkString("\n")
+
+tokenCountsFilteredAll.count
+res24: Long = 5792
+
+def tokenize(line: String): Seq[String] = {
+ line.split("""\W+""")
+ .map(_.toLowerCase)
+ .filter(token => regex.pattern.matcher(token).matches)
+ .filterNot(token => stopwords.contains(token))
+ .filterNot(token => rareTokens.contains(token))
+ .filter(token => token.size >= 2)
+ .toSeq
+}
+
+rdd.flatMap(x => tokenize(x(0))).distinct.count
+res27: Long = 5792
+
+
+val sets = rdd.randomSplit(Array(0.8,0.2))
+val trainSet = sets(0)
+val testSet = sets(1)
+
+val tokens = trainSet.map(x => tokenize(x(0)))
+tokens.first.take(20)
+
+---------------------------
+
+import org.apache.spark.mllib.linalg.{ SparseVector => SV }
+import org.apache.spark.mllib.feature.HashingTF
+import org.apache.spark.mllib.feature.IDF
+
+val dim = math.pow(2, 13).toInt
+val hashingTF = new HashingTF(dim)
+
+-- transform function of HashingTF maps each input document (that is, a sequence of tokens) to an MLlib Vector.
+val tf = hashingTF.transform(tokens)
+tf.cache
+
+val v = tf.first.asInstanceOf[SV]
+v.size
+v.values.size
+println(v.values.take(10).toSeq)
+println(v.indices.take(10).toSeq)
+
+-- compute the inverse document frequency for each term in the corpus
+-- by creating a new IDF instance and calling fit with our RDD of term frequency
+-- vectors as the input. We will then transform our term frequency vectors to TF-IDF
+-- vectors through the transform function of IDF:
+
+val idf = new IDF().fit(tf)
+val tfidf = idf.transform(tf)
+val v2 = tfidf.first.asInstanceOf[SV]
+println(v2.values.size)
+println(v2.values.take(10).toSeq)
+println(v2.indices.take(10).toSeq)
+
+--------------------------------
+
+import org.apache.spark.mllib.regression.LabeledPoint
+
+val zippedTrain = trainSet.zip(tfidf)
+val train = zippedTrain.map{ case(text,vector) => LabeledPoint(categories(text(1)),vector) }
+train.cache
+
+val testTf = testSet.map(x => hashingTF.transform(tokenize(x(0))))
+val testTfIdf = idf.transform(testTf)
+
+val zippedTest = testSet.zip(testTfIdf)
+val test = zippedTest.map{ case(text,vector) => LabeledPoint(categories(text(1)).toDouble,vector) }
+test.cache
+
+---- Multiclass logistic regression --------------
+
+import org.apache.spark.mllib.classification.{LogisticRegressionModel, LogisticRegressionWithLBFGS}
+val numIterations = 100
+val model = new LogisticRegressionWithLBFGS().setNumClasses(3).run(train)
+
+val validPredicts =  test.map(p => (model.predict(p.features),p.label))
+
+validPredicts.take(20)
+res17: Array[(Double, Double)] = Array((2.0,0.0), (1.0,2.0), (1.0,1.0), (1.0,0.0), (2.0,0.0), (0.0,0.0), (1.0,1.0), (2.0,2.0), (1.0,2.0), (0.0,0.0), (0.0,0.0), (2.0,0.0), (1.0,2.0), (2.0,1.0), (1.0,1.0), (2.0,2.0), (2.0,2.0), (1.0,1.0), (1.0,2.0), (1.0,1.0))
+
+import org.apache.spark.mllib.evaluation.MulticlassMetrics
+val metrics = new MulticlassMetrics(validPredicts)
+validPredicts.filter(x => x._1 == x._2).count  // 2059
+validPredicts.count                            // 2931
+val accuracy = metrics.accuracy   // 0.7024906175366769
+
+---- MLlib Maive Bayes regression --------------
+
+import org.apache.spark.mllib.classification.NaiveBayes
+val model = NaiveBayes.train(train)
+
+val validPredicts =  test.map(p => (model.predict(p.features),p.label))
+
+validPredicts.take(20)
+res20: Array[(Double, Double)] = Array((2.0,0.0), (2.0,2.0), (0.0,1.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (1.0,1.0), (0.0,2.0), (2.0,2.0), (0.0,0.0), (0.0,0.0), (2.0,0.0), (2.0,2.0), (0.0,1.0), (1.0,1.0), (2.0,2.0), (2.0,2.0), (1.0,1.0), (2.0,2.0), (1.0,1.0))
+
+import org.apache.spark.mllib.evaluation.MulticlassMetrics
+val metrics = new MulticlassMetrics(validPredicts)
+validPredicts.filter(x => x._1 == x._2).count  // 2187
+validPredicts.count                            // 2931
+val accuracy = metrics.accuracy   // 0.7461617195496417

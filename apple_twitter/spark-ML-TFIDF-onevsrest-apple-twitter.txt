@@ -1,0 +1,50 @@
+
+val df = spark.read.format("csv").option("header","true").option("quoteAll","true").load("apple-twitter-sentiment-texts.csv")
+
+val df1 = df.where("sentiment is not null")
+
+import org.apache.spark.ml.feature.RegexTokenizer
+val tokenizer = new RegexTokenizer().setInputCol("text").setOutputCol("words").setPattern("""\W+""")
+val df2 = tokenizer.transform(df1)
+
+import org.apache.spark.ml.feature.StopWordsRemover
+val enStopWords = StopWordsRemover.loadDefaultStopWords("english")
+val remover = new StopWordsRemover().setStopWords(enStopWords).
+setInputCol("words").
+setOutputCol("filtered")
+val df3 = remover.transform(df2)
+
+val dim = math.pow(2, 12).toInt
+
+import org.apache.spark.ml.feature.HashingTF
+val tf = new HashingTF().setInputCol("filtered").
+setOutputCol("TFOut").
+setNumFeatures(dim)
+val df4 = tf.transform(df3)
+
+import org.apache.spark.ml.feature.IDF
+val idf = new IDF().setInputCol("TFOut").setOutputCol("features")
+val idfModel = idf.fit(df4)
+val df5 = idfModel.transform(df4)
+
+import org.apache.spark.sql.types._
+val df6 = df5.withColumn("label", df5.col("sentiment").cast(DoubleType) + 1)
+
+import org.apache.spark.ml.classification.{LogisticRegression, OneVsRest}
+val lr = new LogisticRegression
+lr.setRegParam(0.01).setMaxIter(500).setFitIntercept(true)
+
+val ovr = new OneVsRest().setClassifier(lr)
+
+val Array(trainingData, testData) = df6.randomSplit(Array(0.7,0.3),11L)
+
+val ovrmodel = ovr.fit(trainingData)
+
+val pred = ovrmodel.transform(testData)
+
+import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
+val evaluator = new MulticlassClassificationEvaluator().setMetricName("accuracy")
+
+val accuracy = evaluator.evaluate(pred)
+accuracy: Double = 0.7710084033613446
+
