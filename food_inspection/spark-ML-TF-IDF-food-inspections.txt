@@ -1,0 +1,155 @@
+
+val df = spark.read.format("csv").option("header","true").option("quoteAll","true").load("food_inspections/food-inspections.csv")
+
+df.printSchema
+root
+ |-- Inspection ID: string (nullable = true)
+ |-- DBA Name: string (nullable = true)
+ |-- AKA Name: string (nullable = true)
+ |-- License #: string (nullable = true)
+ |-- Facility Type: string (nullable = true)
+ |-- Risk: string (nullable = true)
+ |-- Address: string (nullable = true)
+ |-- City: string (nullable = true)
+ |-- State: string (nullable = true)
+ |-- Zip: string (nullable = true)
+ |-- Inspection Date: string (nullable = true)
+ |-- Inspection Type: string (nullable = true)
+ |-- Results: string (nullable = true)
+ |-- Violations: string (nullable = true)
+ |-- Latitude: string (nullable = true)
+ |-- Longitude: string (nullable = true)
+ |-- Location: string (nullable = true)
+ |-- Historical Wards 2003-2015: string (nullable = true)
+ |-- Zip Codes: string (nullable = true)
+ |-- Community Areas: string (nullable = true)
+ |-- Census Tracts: string (nullable = true)
+ |-- Wards: string (nullable = true)
+ 
+df.groupBy("Results").count.show
++--------------------+------+
+|             Results| count|
++--------------------+------+
+|           Not Ready|  1912|
+|                Fail| 38087|
+|            No Entry|  6324|
+|Business Not Located|    69|
+|  Pass w/ Conditions| 27448|
+|     Out of Business| 16919|
+|                Pass|106066|
++--------------------+------+
+
+df.select("Violations","Results").show
++--------------------+------------------+
+|          Violations|           Results|
++--------------------+------------------+
+|3. MANAGEMENT, FO...|Pass w/ Conditions|
+|10. ADEQUATE HAND...|              Pass|
+|                null|         Not Ready|
+|3. MANAGEMENT, FO...|Pass w/ Conditions|
+|                null|              Pass|
+|                null|              Pass|
+|                null|Pass w/ Conditions|
+|5. PROCEDURES FOR...|Pass w/ Conditions|
+|49. NON-FOOD/FOOD...|              Pass|
+|                null|              Pass|
+|25. CONSUMER ADVI...|Pass w/ Conditions|
+|                null|         Not Ready|
+|                null|Pass w/ Conditions|
+|                null|              Fail|
+|3. MANAGEMENT, FO...|Pass w/ Conditions|
+|45. SINGLE-USE/SI...|              Pass|
+|                null|              Pass|
+|                null|              Pass|
+|3. MANAGEMENT, FO...|Pass w/ Conditions|
+|                null|         Not Ready|
++--------------------+------------------+
+only showing top 20 rows
+
+
+val df1 = df.where("Results in ('Fail','Pass','Pass w/ Conditions')").na.fill("NA", Array("Violations"))
+
+import org.apache.spark.ml.feature.RegexTokenizer
+val tokenizer = new RegexTokenizer().setInputCol("Violations").setOutputCol("words").setPattern("""\W+""")
+val df2 = tokenizer.transform(df1)
+
+import org.apache.spark.ml.feature.StopWordsRemover
+val enStopWords = StopWordsRemover.loadDefaultStopWords("english")
+val remover = new StopWordsRemover().setStopWords(enStopWords).
+setInputCol("words").
+setOutputCol("filtered")
+val df3 = remover.transform(df2)
+
+df3.select(max(size('filtered)).as("max_size")).show
++--------+
+|max_size|
++--------+
+|    1462|
++--------+
+
+val dim = math.pow(2, 11).toInt
+dim: Int = 2048
+
+import org.apache.spark.ml.feature.HashingTF
+val tf = new HashingTF().setInputCol("filtered").
+setOutputCol("TFOut").
+setNumFeatures(dim)
+val df4 = tf.transform(df3)
+
+import org.apache.spark.ml.feature.IDF
+val idf = new IDF().setInputCol("TFOut").setOutputCol("features")
+val idfModel = idf.fit(df4)
+val df5 = idfModel.transform(df4)
+
+import org.apache.spark.ml.feature.{StringIndexer, OneHotEncoder, VectorAssembler}
+
+val resultStrIdx = new StringIndexer().setInputCol("Results").setOutputCol("label")
+val df6 = resultStrIdx.fit(df5).transform(df5)
+
+import org.apache.spark.ml.classification.{LogisticRegression, OneVsRest}
+val lr = new LogisticRegression
+lr.setRegParam(0.01).setMaxIter(200).setFitIntercept(true)
+
+val ovr = new OneVsRest().setClassifier(lr)
+
+val Array(trainingData, testData) = df6.randomSplit(Array(0.7,0.3),11L)
+
+trainingData.cache
+trainingData.count
+
+val ovrmodel = ovr.fit(trainingData)
+
+val pred = ovrmodel.transform(testData)
+
+import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
+val evaluator = new MulticlassClassificationEvaluator().setMetricName("accuracy")
+
+val accuracy = evaluator.evaluate(pred)
+accuracy: Double = 0.8027195908759928
+
+val predRDD = pred.select("prediction","label").rdd.map( row => (row(0).toString.toDouble,row(1).toString.toDouble)).cache
+
+predRDD.take(2)res12: Array[(Double, Double)] = Array((0.0,3.0), (0.0,0.0))                    
+
+import org.apache.spark.mllib.evaluation.MulticlassMetrics
+
+val metrics = new MulticlassMetrics(predRDD)
+
+predRDD.filter(x => x._1 == x._2).count
+res13: Long = 47403                                                             
+
+predRDD.count
+res14: Long = 59053
+
+metrics.accuracy
+res15: Double = 0.8027195908759928
+
+metrics.confusionMatrix
+res16: org.apache.spark.mllib.linalg.Matrix =
+31642.0  69.0    61.0    0.0  0.0  0.0  0.0
+1541.0   9176.0  824.0   0.0  0.0  0.0  0.0
+654.0    967.0   6585.0  0.0  0.0  0.0  0.0
+5090.0   1.0     1.0     0.0  0.0  0.0  0.0
+1808.0   74.0    1.0     0.0  0.0  0.0  0.0
+531.0    6.0     2.0     0.0  0.0  0.0  0.0
+20.0     0.0     0.0     0.0  0.0  0.0  0.0
