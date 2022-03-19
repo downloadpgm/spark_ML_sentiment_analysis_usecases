@@ -40,30 +40,23 @@ df.groupBy("Results").count.show
 |                Pass|106066|
 +--------------------+------+
 
-val rdd1 = df.where("Results in ('Fail','Pass','Pass w/ Conditions')").select("Violations","Results").rdd.map( x => x.toSeq.toArray )
 
-val rdd = rdd1.map( x => {
-   val result = if (x(0) == null) "NA" else x(0).toString
-   Array(result,x(1).toString)
- })
+val rdd1 = df.select("Violations","Results").rdd.map( x => x.toSeq.toArray )
 
-rdd.take(10)
-res4: Array[Array[String]] = Array(Array(NA, Pass), Array(NA, Pass), Array(18. NO EVIDENCE OF RODENT OR INSECT OUTER OPENINGS PROTECTED/RODENT PROOFED, A WRITTEN LOG SHALL BE MAINTAINED AVAILABLE TO THE INSPECTORS - Comments: must provide pest control log book. | 32. FOOD AND NON-FOOD CONTACT SURFACES PROPERLY DESIGNED, CONSTRUCTED AND MAINTAINED - Comments: Pastry door not in good repair. must repair | 34. FLOORS: CONSTRUCTED PER CODE, CLEANED, GOOD REPAIR, COVING INSTALLED, DUST-LESS CLEANING METHODS USED - Comments: must clean in detail and repair the basenoard in the prep area. | 35. WALLS, CEILINGS, ATTACHED EQUIPMENT CONSTRUCTED PER CODE: GOOD REPAIR, SURFACES CLEAN AND DUST-LESS CLEANING METHODS - Comments: must clean in detail the walls by the knife rack. | 36. LIGHTING: REQUIRE...
-
-rdd.map( x => x(1)).distinct.take(10)
-res8: Array[String] = Array(Fail, Pass, Pass w/ Conditions)
+val categories = rdd1.map( x => x(1).toString).distinct.zipWithIndex.collectAsMap
+categories: scala.collection.Map[String,Long] = Map(Out of Business -> 5, Business Not Located -> 2, No Entry -> 3, Not Ready -> 1, Pass w/ Conditions -> 6, Pass -> 4, Fail -> 0)
 
 
 -- remove nonword characters (such as punctuation).
 val nonWordSplit = rdd.flatMap(x => x(0).split("""\W+""").map(_.toLowerCase))
-nonWordSplit.sample(true, 0.3, 42).take(100).mkString(",")
-nonWordSplit.distinct.count   // 42073
+nonWordSplit.sample(true, 0.3, 42).take(20).mkString(",")
+nonWordSplit.distinct.count   // 46008
 
 -- filter out numbers and tokens that are words mixed with numbers
 val regex = """[^0-9]*""".r
 val filterNumbers = nonWordSplit.filter(token => regex.pattern.matcher(token).matches)
-filterNumbers.sample(false, 0.3, 42).take(100).mkString("\n")
-filterNumbers.distinct.count   // 29563
+filterNumbers.sample(false, 0.3, 42).take(20).mkString("\n")
+filterNumbers.distinct.count   // 32252
 
 -- list highest occurrence of words to get an idea which stop words to be removed
 val tokenCounts = filterNumbers.map(t => (t, 1)).reduceByKey(_ + _)
@@ -71,10 +64,8 @@ val orderingDesc = Ordering.by[(String, Int), Int](_._2)
 tokenCounts.top(20)(orderingDesc).mkString("\n")
 
 -- remove stop words
-val stopwords = Set(
- "the","a","an","of","or","in","for","by","on","but", "is", "not", "with", "as", "was", "if",
- "they", "are", "this", "and", "it", "have", "from", "at", "my", "be", "that", "to", "so", "what"
-)
+import org.apache.spark.ml.feature.StopWordsRemover
+val stopwords = StopWordsRemover.loadDefaultStopWords("english")
 val tokenCountsFilteredStopwords = tokenCounts.filter { case(k, v) => !stopwords.contains(k) }
 tokenCountsFilteredStopwords.top(20)(orderingDesc).mkString("\n")
 
@@ -92,7 +83,7 @@ val tokenCountsFilteredAll = tokenCountsFilteredSize.filter { case (k, v) => !ra
 tokenCountsFilteredAll.top(20)(orderingAsc).mkString("\n")
 
 tokenCountsFilteredAll.count
-res24: Long = 16410
+res24: Long = 18018
 
 def tokenize(line: String): Seq[String] = {
  line.split("""\W+""").map(_.toLowerCase)
@@ -104,7 +95,7 @@ def tokenize(line: String): Seq[String] = {
 }
 
 rdd.flatMap(x => tokenize(x(0))).distinct.count
-res37: Long = 16410
+res37: Long = 18018
 
 val sets = rdd.randomSplit(Array(0.7,0.3), 11L)
 val trainSet = sets(0)
@@ -146,66 +137,46 @@ println(v2.indices.take(10).toSeq)
 
 -------------------------
 
-rdd.map( x => x(1)).distinct.take(10)
-res28: Array[String] = Array(Fail, Pass, Pass w/ Conditions)
-
-def labelForResults(s:String) = {
-  s match {
-    case "Fail" => 0.0
-    case "Pass w/ Conditions" | "Pass" => 1.0
-  }
-}
-
 import org.apache.spark.mllib.regression.LabeledPoint
 
 val zippedTrain = trainSet.zip(tfidf)
-val train = zippedTrain.map{ case(text,vector) => LabeledPoint(labelForResults(text(1)),vector) }
+val train = zippedTrain.map{ case(text,vector) => LabeledPoint(categories(text(1)),vector) }
 train.cache
 
 val testTf = testSet.map(x => hashingTF.transform(tokenize(x(0))))
 val testTfIdf = idf.transform(testTf)
 
 val zippedTest = testSet.zip(testTfIdf)
-val test = zippedTest.map{ case(text,vector) => LabeledPoint(labelForResults(text(1)),vector) }
+val test = zippedTest.map{ case(text,vector) => LabeledPoint(categories(text(1)),vector) }
 test.cache
 
----- MLlib logistic regression --------------
+---- MLlib MultiClass logistic regression --------------
 
-import org.apache.spark.mllib.classification.LogisticRegressionWithSGD
-val numIterations = 100
-val model = LogisticRegressionWithSGD.train(train, numIterations)
+import org.apache.spark.mllib.classification.{LogisticRegressionModel, LogisticRegressionWithLBFGS}
 
-val validPredicts =  test.map(p => (model.predict(p.features),p.label))
-
-validPredicts.take(20)
-res31: Array[(Double, Double)] = Array((1.0,1.0), (1.0,1.0), (0.0,0.0), (1.0,1.0), (0.0,0.0), (1.0,0.0), (1.0,1.0), (1.0,1.0), (1.0,1.0), (1.0,0.0), (0.0,0.0), (1.0,1.0), (1.0,1.0), (1.0,0.0), (1.0,1.0), (0.0,0.0), (1.0,1.0), (1.0,1.0), (1.0,1.0), (1.0,1.0))
-
-import org.apache.spark.mllib.evaluation.BinaryClassificationMetrics
-val metrics = new BinaryClassificationMetrics(validPredicts)
-validPredicts.filter(x => x._1 == x._2).count  // 42240
-validPredicts.count                            // 45258
-model.getClass.getSimpleName
-metrics.areaUnderPR   //  0.9394053699515047
-metrics.areaUnderROC  //  0.8810215078738327
-
----- MLlib SVM regression --------------
-
-import org.apache.spark.mllib.classification.SVMWithSGD
-val numIterations = 100
-val model = SVMWithSGD.train(train, numIterations)
+val model = new LogisticRegressionWithLBFGS().setNumClasses(7).run(train)
 
 val validPredicts = test.map(x => (model.predict(x.features),x.label))
 
 validPredicts.take(20)
-res37: Array[(Double, Double)] = Array((1.0,1.0), (1.0,1.0), (0.0,0.0), (1.0,1.0), (0.0,0.0), (1.0,0.0), (1.0,1.0), (1.0,1.0), (1.0,1.0), (1.0,0.0), (0.0,0.0), (1.0,1.0), (1.0,1.0), (1.0,0.0), (1.0,1.0), (0.0,0.0), (1.0,1.0), (1.0,1.0), (1.0,1.0), (1.0,1.0))
+res20: Array[(Double, Double)] = Array((4.0,1.0), (6.0,6.0), (4.0,4.0), (1.0,6.0), (4.0,1.0), (4.0,6.0), (0.0,0.0), (4.0,4.0), (4.0,4.0), (4.0,4.0), (4.0,6.0), (4.0,4.0), (4.0,5.0), (4.0,1.0), (4.0,4.0), (4.0,3.0), (4.0,3.0), (4.0,4.0), (0.0,6.0), (4.0,3.0))
 
-import org.apache.spark.mllib.evaluation.BinaryClassificationMetrics
-val metrics = new BinaryClassificationMetrics(validPredicts)
-validPredicts.filter(x => x._1 == x._2).count  // 42388
-validPredicts.count                            // 45258
-model.getClass.getSimpleName
-metrics.areaUnderPR   // 0.9424728890782741
-metrics.areaUnderROC  // 0.8872215705857761
+import org.apache.spark.mllib.evaluation.MulticlassMetrics
+val metrics = new MulticlassMetrics(validPredicts)
+validPredicts.filter(x => x._1 == x._2).count  // 45134
+validPredicts.count                            // 59053
+val accuracy = metrics.accuracy   // 0.764296479433729
+
+metrics.confusionMatrix
+res23: org.apache.spark.mllib.linalg.Matrix =                                   
+8463.0  7.0   0.0  90.0   1474.0   0.0   1413.0
+9.0     0.0   0.0  0.0    569.0    0.0   5.0
+0.0     0.0   0.0  0.0    18.0     0.0   0.0
+74.0    0.0   0.0  6.0    1826.0   0.0   7.0
+560.0   11.0  0.0  113.0  30694.0  10.0  636.0
+3.0     0.0   0.0  0.0    4995.0   0.0   1.0
+1488.0  7.0   0.0  20.0   581.0    2.0   5971.0
+
 
 ---- MLlib Naive Bayes regression --------------
 
@@ -215,12 +186,20 @@ val model = NaiveBayes.train(train)
 val validPredicts = test.map(x => (model.predict(x.features),x.label))
 
 validPredicts.take(20)
-res43: Array[(Double, Double)] = Array((1.0,1.0), (1.0,1.0), (0.0,0.0), (1.0,1.0), (0.0,0.0), (1.0,0.0), (1.0,1.0), (1.0,1.0), (1.0,1.0), (0.0,0.0), (0.0,0.0), (1.0,1.0), (1.0,1.0), (1.0,0.0), (0.0,1.0), (0.0,0.0), (1.0,1.0), (1.0,1.0), (1.0,1.0), (1.0,1.0))
+res25: Array[(Double, Double)] = Array((5.0,1.0), (6.0,6.0), (5.0,4.0), (6.0,6.0), (5.0,1.0), (5.0,6.0), (0.0,0.0), (5.0,4.0), (6.0,4.0), (5.0,4.0), (5.0,6.0), (5.0,4.0), (5.0,5.0), (5.0,1.0), (5.0,4.0), (5.0,3.0), (5.0,3.0), (5.0,4.0), (6.0,6.0), (5.0,3.0))
 
-import org.apache.spark.mllib.evaluation.BinaryClassificationMetrics
-val metrics = new BinaryClassificationMetrics(validPredicts)
-validPredicts.filter(x => x._1 == x._2).count  // 40665
-validPredicts.count                            // 45258
-model.getClass.getSimpleName
-metrics.areaUnderPR   //  0.931522047288006
-metrics.areaUnderROC  //  0.855921084890809
+import org.apache.spark.mllib.evaluation.MulticlassMetrics
+val metrics = new MulticlassMetrics(validPredicts)
+validPredicts.filter(x => x._1 == x._2).count  // 45134
+validPredicts.count                            // 59053
+val accuracy = metrics.accuracy   // 0.7182192267962677
+
+metrics.confusionMatrix
+res28: org.apache.spark.mllib.linalg.Matrix =
+8145.0  1.0  0.0  57.0   729.0    944.0   1571.0
+8.0     0.0  0.0  0.0    2.0      566.0   7.0
+0.0     0.0  0.0  0.0    0.0      18.0    0.0
+65.0    0.0  0.0  10.0   55.0     1769.0  14.0
+729.0   3.0  0.0  194.0  23052.0  7209.0  837.0
+4.0     0.0  0.0  0.0    3.0      4991.0  1.0
+1400.0  1.0  0.0  14.0   297.0    142.0   6215.0

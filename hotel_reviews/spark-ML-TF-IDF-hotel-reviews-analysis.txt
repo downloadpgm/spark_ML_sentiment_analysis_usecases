@@ -35,6 +35,7 @@ root
  |-- word: string (nullable = true)
  
 val removedTokens = wholeFilters.agg(collect_list('word).as("removedwords"))
+
 removedTokens.show
 +--------------------+
 |        removedwords|
@@ -49,6 +50,7 @@ res24: Array[String] = Array(WrappedArray(07, 296, 4032, 675, 1512, inwas, telep
 
 val removedListWords = removedWords.collect
 removedListWords: Array[String] = Array(WrappedArray(07, 296, 4032, 675, 1512, inwas, telephonecommunication, uglyiest, comping, throhg, bookshelf, 57th, invisable, buba, tylers, wharfe, peter__, rtitz, peolpe, 10sep, honeymoom, balding, trotts, boking, gastronomical, catamara, appproached, seralles, hooney, prisms, geoge, reasoable, smarties, spendaholic, aquos, onaccessible, matter__, davidsan, smorgy, smokefree, feltwe, michelet, seating__, melodic, effer, soirees, recoment, tarnish, clubmany, evening4, reconditionning, cubs, mng, bateaux, ransom, consistenly, terino, trobadero, tuchinski, intercontis, nicotine, ascharming, rejuvenate, spotaround, isssus, prblems, bombonera, escalotor, procrastinators, 20au, hse, inverted, bricked, junp, laterwatch, torontonian, 75m, seperation, quei...
+
 
 import org.apache.spark.ml.feature.StopWordsRemover
 val remover = new StopWordsRemover().setStopWords(removedListWords).
