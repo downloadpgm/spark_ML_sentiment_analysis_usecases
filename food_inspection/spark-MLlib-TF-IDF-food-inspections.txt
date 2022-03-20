@@ -41,9 +41,11 @@ df.groupBy("Results").count.show
 +--------------------+------+
 
 
-val rdd1 = df.select("Violations","Results").rdd.map( x => x.toSeq.toArray )
+val rdd1 = df.select("Violations","Results").na.fill("NA", Array("Violations")).rdd
 
-val categories = rdd1.map( x => x(1).toString).distinct.zipWithIndex.collectAsMap
+val rdd = rdd1.map( x => x.toSeq.map( y => y.toString ) ).map( x => x.toArray )
+
+val categories = rdd.map( x => x(1)).distinct.zipWithIndex.collectAsMap
 categories: scala.collection.Map[String,Long] = Map(Out of Business -> 5, Business Not Located -> 2, No Entry -> 3, Not Ready -> 1, Pass w/ Conditions -> 6, Pass -> 4, Fail -> 0)
 
 
@@ -114,40 +116,29 @@ val dim = math.pow(2, 15).toInt
 val hashingTF = new HashingTF(dim)
 
 -- transform function of HashingTF maps each input document (that is, a sequence of tokens) to an MLlib Vector.
-val tf = hashingTF.transform(tokens)
-tf.cache
-
-val v = tf.first.asInstanceOf[SV]
-v.size
-v.values.size
-println(v.values.take(10).toSeq)
-println(v.indices.take(10).toSeq)
+val trainTf = trainSet.map(x => hashingTF.transform(tokenize(x(0))))
+trainTf.cache
 
 -- compute the inverse document frequency for each term in the corpus
 -- by creating a new IDF instance and calling fit with our RDD of term frequency
--- vectors as the input. We will then transform our term frequency vectors to TF-IDF
--- vectors through the transform function of IDF:
+-- vectors as the input.
 
-val idf = new IDF().fit(tf)
-val tfidf = idf.transform(tf)
-val v2 = tfidf.first.asInstanceOf[SV]
-println(v2.values.size)
-println(v2.values.take(10).toSeq)
-println(v2.indices.take(10).toSeq)
+val idf = new IDF().fit(trainTf)
+val trainTfIdf = idf.transform(trainTf)
 
 -------------------------
 
 import org.apache.spark.mllib.regression.LabeledPoint
 
-val zippedTrain = trainSet.zip(tfidf)
-val train = zippedTrain.map{ case(text,vector) => LabeledPoint(categories(text(1)),vector) }
+val zipTrain = trainSet.zip(trainTfIdf)
+val train = zipTrain.map{ case(dset,vector) => LabeledPoint(categories(dset(1)),vector) }
 train.cache
 
 val testTf = testSet.map(x => hashingTF.transform(tokenize(x(0))))
 val testTfIdf = idf.transform(testTf)
 
-val zippedTest = testSet.zip(testTfIdf)
-val test = zippedTest.map{ case(text,vector) => LabeledPoint(categories(text(1)),vector) }
+val zipTest = testSet.zip(testTfIdf)
+val test = zipTest.map{ case(dset,vector) => LabeledPoint(categories(dset(1)),vector) }
 test.cache
 
 ---- MLlib MultiClass logistic regression --------------
@@ -186,7 +177,7 @@ val model = NaiveBayes.train(train)
 val validPredicts = test.map(x => (model.predict(x.features),x.label))
 
 validPredicts.take(20)
-res25: Array[(Double, Double)] = Array((5.0,1.0), (6.0,6.0), (5.0,4.0), (6.0,6.0), (5.0,1.0), (5.0,6.0), (0.0,0.0), (5.0,4.0), (6.0,4.0), (5.0,4.0), (5.0,6.0), (5.0,4.0), (5.0,5.0), (5.0,1.0), (5.0,4.0), (5.0,3.0), (5.0,3.0), (5.0,4.0), (6.0,6.0), (5.0,3.0))
+es16: Array[(Double, Double)] = Array((5.0,1.0), (6.0,6.0), (5.0,4.0), (6.0,6.0), (5.0,1.0), (5.0,6.0), (0.0,0.0), (5.0,4.0), (6.0,4.0), (5.0,4.0), (5.0,6.0), (5.0,4.0), (5.0,5.0), (5.0,1.0), (5.0,4.0), (5.0,3.0), (5.0,3.0), (5.0,4.0), (6.0,6.0), (5.0,3.0))
 
 import org.apache.spark.mllib.evaluation.MulticlassMetrics
 val metrics = new MulticlassMetrics(validPredicts)
@@ -195,7 +186,7 @@ validPredicts.count                            // 59053
 val accuracy = metrics.accuracy   // 0.7182192267962677
 
 metrics.confusionMatrix
-res28: org.apache.spark.mllib.linalg.Matrix =
+res19: org.apache.spark.mllib.linalg.Matrix =
 8145.0  1.0  0.0  57.0   729.0    944.0   1571.0
 8.0     0.0  0.0  0.0    2.0      566.0   7.0
 0.0     0.0  0.0  0.0    0.0      18.0    0.0
