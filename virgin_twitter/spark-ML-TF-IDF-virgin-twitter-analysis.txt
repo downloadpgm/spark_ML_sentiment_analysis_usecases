@@ -74,8 +74,7 @@ val df4 = remover.transform(df3)
 // total words relevant for analysis
 df4.select(explode('filtered).as("word")).distinct.count  // 5977
 
-val dim = math.pow(2, 13).toInt
-dim: Int = 8192
+val dim = math.pow(2, 13).toInt  // 8192
 
 import org.apache.spark.ml.feature.HashingTF
 val tf = new HashingTF().setInputCol("filtered").
@@ -101,7 +100,6 @@ root
  |-- TFOut: vector (nullable = true)
  |-- features: vector (nullable = true)
 
----- ML OneVsRest classification --------------
 
 import org.apache.spark.ml.feature.{StringIndexer}
 
@@ -112,6 +110,8 @@ val Array(trainingData, testData) = df7.randomSplit(Array(0.7,0.3),11L)
 
 trainingData.cache
 trainingData.count  // 10335
+
+---- ML OneVsRest classification --------------
 
 import org.apache.spark.ml.classification.{LogisticRegression, OneVsRest}
 val lr = new LogisticRegression

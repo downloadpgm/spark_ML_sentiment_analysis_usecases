@@ -1,7 +1,7 @@
 
-val df = spark.read.format("csv").option("header","true").option("quoteAll","true").load("apple-twitter/apple-twitter-sentiment-texts.csv")
+val df = spark.read.format("csv").option("header","true").option("quoteAll","true").load("apple/apple-twitter-sentiment-texts.csv")
 
-scala> df.select("sentiment").distinct.show
+df.select("sentiment").distinct.show
 +---------+
 |sentiment|
 +---------+
@@ -12,22 +12,22 @@ scala> df.select("sentiment").distinct.show
 |        1|
 +---------+
 
-val rdd1 = df.where("sentiment is not null").rdd
+val rdd1 = df.where("sentiment is not null").withColumn("sentiment", df.col("sentiment").cast(DoubleType) + 1).rdd
 
 val rdd = rdd1.map( x => x.toSeq.toArray ).map( x => x.map( y => y.toString.trim))
 
 rdd.map( x => x(1)).distinct.take(10)
-res1: Array[String] = Array(-1, 0, 1)
+res43: Array[String] = Array(1.0, 0.0, 2.0)
 
 -- remove nonword characters (such as punctuation).
 val nonWordSplit = rdd.flatMap(x => x(0).split("""\W+""").map(_.toLowerCase))
-nonWordSplit.sample(true, 0.3, 42).take(100).mkString(",")
+nonWordSplit.sample(true, 0.3, 42).take(20).mkString(",")
 nonWordSplit.distinct.count   // 5185
 
 -- filter out numbers and tokens that are words mixed with numbers
 val regex = """[^0-9]*""".r
 val filterNumbers = nonWordSplit.filter(token => regex.pattern.matcher(token).matches)
-filterNumbers.sample(false, 0.3, 42).take(100).mkString("\n")
+filterNumbers.sample(false, 0.3, 42).take(20).mkString("\n")
 filterNumbers.distinct.count   // 4284
 
 -- list highest occurrence of words to get an idea which stop words to be removed
@@ -36,10 +36,8 @@ val orderingDesc = Ordering.by[(String, Int), Int](_._2)
 tokenCounts.top(20)(orderingDesc).mkString("\n")
 
 -- remove stop words
-val stopwords = Set(
- "the","a","an","of","or","in","for","by","on","but", "is", "not", "with", "as", "was", "if",
- "they", "are", "this", "and", "it", "have", "from", "at", "my", "be", "that", "to", "so", "what"
-)
+import org.apache.spark.ml.feature.StopWordsRemover
+val stopwords = StopWordsRemover.loadDefaultStopWords("english")
 val tokenCountsFilteredStopwords = tokenCounts.filter { case(k, v) => !stopwords.contains(k) }
 tokenCountsFilteredStopwords.top(20)(orderingDesc).mkString("\n")
 
@@ -56,23 +54,20 @@ val rareTokens = tokenCounts.filter{ case (k, v) => v < 2 }.map{ case (k, v) => 
 val tokenCountsFilteredAll = tokenCountsFilteredSize.filter { case (k, v) => !rareTokens.contains(k) }
 tokenCountsFilteredAll.top(20)(orderingAsc).mkString("\n")
 
-tokenCountsFilteredAll.count
-res24: Long = 1787
+tokenCountsFilteredAll.count  // 1705
 
 def tokenize(line: String): Seq[String] = {
- line.split("""\W+""")
- .map(_.toLowerCase)
+ line.split("""\W+""").map(_.toLowerCase)
  .filter(token => regex.pattern.matcher(token).matches)
- .filterNot(token => stopwords.contains(token))
- .filterNot(token => rareTokens.contains(token))
+ .filter(token => !stopwords.contains(token))
  .filter(token => token.size >= 2)
+ .filter(token => !rareTokens.contains(token))
  .toSeq
 }
 
-rdd.flatMap(x => tokenize(x(0))).distinct.count
-res27: Long = 1787
+rdd.flatMap(x => tokenize(x(0))).distinct.count  // 1705
 
-val sets = rdd.randomSplit(Array(0.7,0.3))
+val sets = rdd.randomSplit(Array(0.7,0.3), 11L)
 val trainSet = sets(0)
 val testSet = sets(1)
 
@@ -89,40 +84,29 @@ val dim = math.pow(2, 12).toInt
 val hashingTF = new HashingTF(dim)
 
 -- transform function of HashingTF maps each input document (that is, a sequence of tokens) to an MLlib Vector.
-val tf = hashingTF.transform(tokens)
-tf.cache
-
-val v = tf.first.asInstanceOf[SV]
-v.size
-v.values.size
-println(v.values.take(10).toSeq)
-println(v.indices.take(10).toSeq)
+val trainTf = trainSet.map(x => hashingTF.transform(tokenize(x(0))))
+trainTf.cache
 
 -- compute the inverse document frequency for each term in the corpus
 -- by creating a new IDF instance and calling fit with our RDD of term frequency
--- vectors as the input. We will then transform our term frequency vectors to TF-IDF
--- vectors through the transform function of IDF:
+-- vectors as the input.
 
-val idf = new IDF().fit(tf)
-val tfidf = idf.transform(tf)
-val v2 = tfidf.first.asInstanceOf[SV]
-println(v2.values.size)
-println(v2.values.take(10).toSeq)
-println(v2.indices.take(10).toSeq)
+val idf = new IDF().fit(trainTf)
+val trainTfIdf = idf.transform(trainTf)
 
 ---------------------
 
 import org.apache.spark.mllib.regression.LabeledPoint
 
-val zippedTrain = trainSet.zip(tfidf)
-val train = zippedTrain.map{ case(text,vector) => LabeledPoint(text(1).toDouble + 1,vector) }
+val zipTrain = trainSet.zip(trainTfIdf)
+val train = zipTrain.map{ case(dset,vector) => LabeledPoint(dset(1).toDouble,vector) }
 train.cache
 
 val testTf = testSet.map(x => hashingTF.transform(tokenize(x(0))))
 val testTfIdf = idf.transform(testTf)
 
-val zippedTest = testSet.zip(testTfIdf)
-val test = zippedTest.map{ case(text,vector) => LabeledPoint(text(1).toDouble + 1,vector) }
+val zipTest = testSet.zip(testTfIdf)
+val test = zipTest.map{ case(dset,vector) => LabeledPoint(dset(1).toDouble,vector) }
 test.cache
 
 ---- MLlib logistic regression --------------
@@ -150,19 +134,19 @@ val model = new LogisticRegressionWithLBFGS().setNumClasses(3).run(train)
 val validPredicts =  test.map(p => (model.predict(p.features),p.label))
 
 validPredicts.take(20)
-res17: Array[(Double, Double)] = Array((2.0,0.0), (1.0,2.0), (1.0,1.0), (1.0,1.0), (0.0,1.0), (1.0,1.0), (0.0,0.0), (1.0,0.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (2.0,0.0), (1.0,2.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (1.0,1.0), (1.0,1.0), (1.0,0.0))
+res52: Array[(Double, Double)] = Array((2.0,2.0), (1.0,1.0), (2.0,0.0), (1.0,0.0), (0.0,0.0), (0.0,0.0), (0.0,1.0), (1.0,1.0), (0.0,0.0), (1.0,2.0), (1.0,0.0), (1.0,1.0), (1.0,1.0), (1.0,0.0), (0.0,0.0), (0.0,0.0), (2.0,0.0), (0.0,0.0), (0.0,0.0), (0.0,0.0))
 
 import org.apache.spark.mllib.evaluation.MulticlassMetrics
 val metrics = new MulticlassMetrics(validPredicts)
-validPredicts.filter(x => x._1 == x._2).count  // 347
-validPredicts.count                            // 465
-val accuracy = metrics.accuracy   // 0.7462365591397849
+validPredicts.filter(x => x._1 == x._2).count  // 331
+validPredicts.count                            // 476
+val accuracy = metrics.accuracy   // 0.6953781512605042
 
 metrics.confusionMatrix
-res20: org.apache.spark.mllib.linalg.Matrix =
-152.0  34.0   11.0
-31.0   178.0  23.0
-3.0    16.0   17.0
+res55: org.apache.spark.mllib.linalg.Matrix =
+171.0  20.0   20.0
+46.0   141.0  38.0
+9.0    12.0   19.0
 
 ---- MLlib Maive Bayes regression --------------
 
@@ -172,16 +156,16 @@ val model = NaiveBayes.train(train)
 val validPredicts =  test.map(p => (model.predict(p.features),p.label))
 
 validPredicts.take(20)
-res21: Array[(Double, Double)] = Array((0.0,0.0), (0.0,2.0), (1.0,1.0), (1.0,1.0), (1.0,1.0), (0.0,1.0), (0.0,0.0), (1.0,0.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (1.0,2.0), (1.0,0.0), (0.0,0.0), (0.0,0.0), (1.0,1.0), (0.0,1.0), (1.0,0.0))
+res56: Array[(Double, Double)] = Array((2.0,2.0), (1.0,1.0), (0.0,0.0), (1.0,0.0), (0.0,0.0), (0.0,0.0), (1.0,1.0), (1.0,1.0), (0.0,0.0), (1.0,2.0), (0.0,0.0), (1.0,1.0), (0.0,1.0), (1.0,0.0), (0.0,0.0), (0.0,0.0), (2.0,0.0), (0.0,0.0), (0.0,0.0), (0.0,0.0))
 
 import org.apache.spark.mllib.evaluation.MulticlassMetrics
 val metrics = new MulticlassMetrics(validPredicts)
-validPredicts.filter(x => x._1 == x._2).count  // 347
-validPredicts.count                            // 465
-val accuracy = metrics.accuracy   // 0.7462365591397849
+validPredicts.filter(x => x._1 == x._2).count  // 353
+validPredicts.count                            // 476
+val accuracy = metrics.accuracy   // 0.7415966386554622
 
 metrics.confusionMatrix
-res24: org.apache.spark.mllib.linalg.Matrix =
-165.0  25.0   7.0
-47.0   166.0  19.0
-9.0    11.0   16.0
+res59: org.apache.spark.mllib.linalg.Matrix =
+181.0  15.0   15.0
+40.0   158.0  27.0
+10.0   16.0   14.0

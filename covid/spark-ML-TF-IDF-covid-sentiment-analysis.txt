@@ -1,0 +1,211 @@
+
+val df = spark.read.format("csv").option("header","true").option("inferSchema","true").option("quoteAll","true").option("multiLine","true").load("covid/Corona_NLP_train.csv")
+
+df.printSchema
+root
+ |-- UserName: integer (nullable = true)
+ |-- ScreenName: integer (nullable = true)
+ |-- Location: string (nullable = true)
+ |-- TweetAt: string (nullable = true)
+ |-- OriginalTweet: string (nullable = true)
+ |-- Sentiment: string (nullable = true)
+: string (nullable = true)
+
+df.show
++--------+----------+--------------------+----------+--------------------+-------------------+----+
+|UserName|ScreenName|            Location|   TweetAt|       OriginalTweet|          Sentiment|  X
++--------+----------+--------------------+----------+--------------------+-------------------+----+
+|null|799|     48751|              London|16-03-2020|@MeNyrbie @Phil_G...|           Neutral
+|null|800|     48752|                  UK|16-03-2020|advice Talk to yo...|          Positive
+|null|801|     48753|           Vagabonds|16-03-2020|Coronavirus Austr...|          Positive
+|null|802|     48754|                null|16-03-2020|My food stock is ...|          Positive
+|null|803|     48755|                null|16-03-2020|Me, ready to go a...|Extremely Negative
+|null|804|     48756|ÜT: 36.319708,-82...|16-03-2020|As news of the re...|          Positive
+|null|805|     48757|35.926541,-78.753267|16-03-2020|Cashier at grocer...|          Positive
+|null|806|     48758|             Austria|16-03-2020|Was at the superm...|           Neutral
+|null|807|     48759|     Atlanta, GA USA|16-03-2020|Due to COVID-19 o...|          Positive
+|null|808|     48760|    BHAVNAGAR,GUJRAT|16-03-2020|For corona preven...|          Negative
+|null|809|     48761|      Makati, Manila|16-03-2020|All month there h...|           Neutral
+|null|810|     48762|Pitt Meadows, BC,...|16-03-2020|Due to the Covid-...|Extremely Positive
+|null|811|     48763|          Horningsea|16-03-2020|#horningsea is a ...|Extremely Positive
+|null|812|     48764|         Chicago, IL|16-03-2020|Me: I don't need ...|          Positive
+|null|813|     48765|                null|16-03-2020|ADARA Releases CO...|          Positive
+|null|814|     48766|      Houston, Texas|16-03-2020|Lines at the groc...|          Positive
+|null|815|     48767|        Saudi Arabia|16-03-2020|????? ????? ?????...|           Neutral
+|null|816|     48768|     Ontario, Canada|16-03-2020|@eyeonthearctic 1...|           Neutral
+|null|817|     48769|       North America|16-03-2020|Amazon Glitch Sty...|Extremely Positive
+|null|818|     48770|          Denver, CO|16-03-2020|For those who are...|          Positive
++--------+----------+--------------------+----------+--------------------+-------------------+----+
+only showing top 20 rows
+
+
+df.groupBy("Sentiment").count.show
++-------------------+-----+
+|          Sentiment|count|
++-------------------+-----+
+| 6624|ely Positive
+| 9917|    Negative
+| 5481|ely Negative
+|11422|    Positive
+| 7713|     Neutral
++-------------------+-----+
+
+val df1 = df.select('OriginalTweet, 'Sentiment)
+ 
+df1.printSchema
+root
+ |-- OriginalTweet: string (nullable = true)
+ |-- Sentiment: string (nullable = true)
+
+import org.apache.spark.ml.feature.RegexTokenizer
+val tokenizer = new RegexTokenizer().setInputCol("OriginalTweet").setOutputCol("words").setPattern("""\W+""")
+val df2 = tokenizer.transform(df1)
+
+df2.select(explode('words).as("word")).distinct.count  // 78988
+
+// filter out numbers and tokens that are words mixed with numbers
+val filterNumbers = df2.select(explode('words).as("word")).where('word.rlike("^[0-9]*$")).distinct
+
+// lists tokens greather one-character length
+val tokenCountsFilteredSize = df2.select(explode('words).as("word")).where(length('word) === 1).distinct
+
+// remove terms with only one-occurrence
+val rareTokens = df2.select(explode('words).as("word")).groupBy('word).count.where('count === 1).select('word)
+
+// unioned all terms to be removed
+val wholeFilters = filterNumbers.union(tokenCountsFilteredSize).union(rareTokens).distinct.cache
+
+wholeFilters.count  // 56172
+
+wholeFilters.printSchema
+root
+ |-- word: string (nullable = true)
+ 
+val removedWords= wholeFilters.select("word").map( x => x.getString(0)).collect.toArray
+removedWords: Array[String] = Array(6240, 675, 07, 296, 1436, 45670, accumulation, bv0ajl2yww, 0oahf51fti, lidfroxwzl, blakkrasta, 5g2vyfxdhb, wqmkvdzyyx, obxzwkz9us, qllmycxlyv, deweysim, w8nnq623hi, zkjjz9wxjw, sasm0nnswo, neverbiden, plovyf4x1f, t65e8s0ncr, n90qcgoakb, 4rmykq3bvb, iwj5c17o1x, qkomdvm6rl, gt4ocfptf5, k9flexsycj, d5kgln2anv, minfin, ohufz26o3n, compassionatecommunity, unworldly, 0xnbzwjdyc, gopwllhizh, idiotinchief, uev08bpmpy, rmd3xiekrq, firesell, hampsteadgardensuburb, hankallenwx, qeulj98axj, c8gd6gvz3n, pucslrfp3u, lmfmradio, efqguzv36s, u4o0f5lnkj, librarian, guldbaek, confidentiality, danyorkeshow, nidyswv2g5, r93vepyhzv, dhjieyiuh5, luthuli, 75m, vbahimh4ym, 31t3oszwdy, letbknl8su, pondlife, temporarywork, fooddemand, fbmsqev45x, jamb, enablement, wank, oscar, ...
+
+// remove stop words
+import org.apache.spark.ml.feature.StopWordsRemover
+val enStopWords = StopWordsRemover.loadDefaultStopWords("english")
+val remover = new StopWordsRemover().setStopWords(enStopWords).
+setInputCol("words").
+setOutputCol("filteredStopWords")
+val df3 = remover.transform(df2)
+
+// total words after stopwords removal
+df3.select(explode('filteredStopWords).as("word")).distinct.count  // 78857
+
+// remove tokens collected in removedListWords
+import org.apache.spark.ml.feature.StopWordsRemover
+val remover = new StopWordsRemover().setStopWords(removedWords).
+setInputCol("filteredStopWords").
+setOutputCol("filtered")
+val df4 = remover.transform(df3)
+
+// total words relevant for analysis
+df4.select(explode('filtered).as("word")).distinct.count  // 22689
+
+val dim = math.pow(2, 15).toInt  // 32768
+
+import org.apache.spark.ml.feature.HashingTF
+val tf = new HashingTF().setInputCol("filtered").
+setOutputCol("TFOut").
+setNumFeatures(dim)
+val df5 = tf.transform(df4)
+
+import org.apache.spark.ml.feature.IDF
+val idf = new IDF().setInputCol("TFOut").setOutputCol("features")
+val idfModel = idf.fit(df5)
+val df6 = idfModel.transform(df5)
+
+df6.printSchema
+root
+ |-- OriginalTweet: string (nullable = true)
+ |-- Sentiment: string (nullable = true)
+ |-- words: array (nullable = true)
+ |    |-- element: string (containsNull = true)
+ |-- filteredStopWords: array (nullable = true)
+ |    |-- element: string (containsNull = true)
+ |-- filtered: array (nullable = true)
+ |    |-- element: string (containsNull = true)
+ |-- TFOut: vector (nullable = true)
+ |-- features: vector (nullable = true)
+
+
+import org.apache.spark.ml.feature.{StringIndexer}
+
+val resultStrIdx = new StringIndexer().setInputCol("Sentiment").setOutputCol("label")
+val df7 = resultStrIdx.fit(df6).transform(df6)
+
+val Array(trainingData, testData) = df7.randomSplit(Array(0.7,0.3),11L)
+
+trainingData.cache
+trainingData.count  // 29010
+
+---- ML OneVsRest classification --------------
+
+import org.apache.spark.ml.classification.{LogisticRegression, OneVsRest}
+val lr = new LogisticRegression
+lr.setRegParam(0.01).setMaxIter(200).setFitIntercept(true)
+
+val ovr = new OneVsRest().setClassifier(lr)
+
+val ovrmodel = ovr.fit(trainingData)
+val pred = ovrmodel.transform(testData).cache
+
+import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
+val evaluator = new MulticlassClassificationEvaluator().setMetricName("accuracy")
+
+evaluator.evaluate(pred)  // 0.7421602787456446
+
+val predRDD = pred.select("prediction","label").rdd.map( row => (row(0).toString.toDouble,row(1).toString.toDouble)).cache
+
+predRDD.take(20)
+res10: Array[(Double, Double)] = Array((3.0,3.0), (1.0,0.0), (0.0,3.0), (4.0,4.0), (0.0,1.0), (0.0,1.0), (0.0,0.0), (1.0,4.0), (3.0,0.0), (3.0,0.0), (1.0,1.0), (1.0,1.0), (1.0,4.0), (2.0,0.0), (2.0,2.0), (1.0,1.0), (1.0,3.0), (0.0,1.0), (0.0,0.0), (3.0,0.0))
+
+import org.apache.spark.mllib.evaluation.MulticlassMetrics
+val metrics = new MulticlassMetrics(predRDD)
+
+predRDD.filter(x => x._1 == x._2).count  // 5717
+predRDD.count     // 12147
+metrics.accuracy  // 0.4706511895941385
+
+metrics.confusionMatrix
+res14: org.apache.spark.mllib.linalg.Matrix =
+1523.0  647.0   570.0   495.0  133.0
+726.0   1240.0  444.0   104.0  363.0
+494.0   471.0   1193.0  68.0   63.0
+718.0   134.0   99.0    973.0  38.0
+181.0   565.0   92.0    25.0   788.0
+
+---- ML Naive Bayes classification --------------
+
+import org.apache.spark.ml.classification.NaiveBayes
+val model = new NaiveBayes().fit(trainingData)
+
+val pred = model.transform(testData).cache
+
+import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
+val evaluator = new MulticlassClassificationEvaluator().setMetricName("accuracy")
+
+evaluator.evaluate(pred)  // 0.7240418118466899
+
+val predRDD = pred.select("prediction","label").rdd.map( row => (row(0).toString.toDouble,row(1).toString.toDouble)).cache
+
+predRDD.take(20)
+res16: Array[(Double, Double)] = Array((3.0,3.0), (3.0,0.0), (0.0,3.0), (4.0,4.0), (0.0,1.0), (0.0,1.0), (0.0,0.0), (3.0,4.0), (2.0,0.0), (3.0,0.0), (1.0,1.0), (0.0,1.0), (1.0,4.0), (2.0,0.0), (2.0,2.0), (4.0,1.0), (1.0,3.0), (3.0,1.0), (3.0,0.0), (3.0,0.0))
+
+import org.apache.spark.mllib.evaluation.MulticlassMetrics
+val metrics = new MulticlassMetrics(predRDD)
+
+predRDD.filter(x => x._1 == x._2).count  // 5096
+predRDD.count     // 12147
+metrics.accuracy  // 0.4195274553387668
+
+metrics.confusionMatrix
+res20: org.apache.spark.mllib.linalg.Matrix =
+1266.0  591.0   414.0  839.0  258.0
+643.0   1112.0  265.0  249.0  608.0
+485.0   458.0   961.0  207.0  178.0
+661.0   176.0   90.0   946.0  89.0
+163.0   556.0   70.0   51.0   811.0

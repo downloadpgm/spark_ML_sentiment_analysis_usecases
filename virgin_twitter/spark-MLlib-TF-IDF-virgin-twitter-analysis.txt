@@ -74,8 +74,7 @@ val rareTokens = tokenCounts.filter{ case (k, v) => v < 2 }.map{ case (k, v) => 
 val tokenCountsFilteredAll = tokenCountsFilteredSize.filter { case (k, v) => !rareTokens.contains(k) }
 tokenCountsFilteredAll.top(20)(orderingAsc).mkString("\n")
 
-tokenCountsFilteredAll.count
-res24: Long = 5698
+tokenCountsFilteredAll.count  // 5698
 
 def tokenize(line: String): Seq[String] = {
  line.split("""\W+""").map(_.toLowerCase)
@@ -86,11 +85,9 @@ def tokenize(line: String): Seq[String] = {
  .toSeq
 }
 
-rdd.flatMap(x => tokenize(x(0))).distinct.count
-res27: Long = 5698
+rdd.flatMap(x => tokenize(x(0))).distinct.count  // 5698
 
-
-val sets = rdd.randomSplit(Array(0.8,0.2))
+val sets = rdd.randomSplit(Array(0.7,0.3), 11L)
 val trainSet = sets(0)
 val testSet = sets(1)
 

@@ -148,7 +148,6 @@ root
  |-- TFOut: vector (nullable = true)
  |-- features: vector (nullable = true)
 
----- ML OneVsRest classification --------------
 
 import org.apache.spark.ml.feature.{StringIndexer}
 
@@ -159,6 +158,8 @@ val Array(trainingData, testData) = df7.randomSplit(Array(0.7,0.3),11L)
 
 trainingData.cache
 trainingData.count  // 137772
+
+---- ML OneVsRest classification --------------
 
 import org.apache.spark.ml.classification.{LogisticRegression, OneVsRest}
 val lr = new LogisticRegression

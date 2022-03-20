@@ -133,7 +133,6 @@ root
  |-- TFOut: vector (nullable = true)
  |-- features: vector (nullable = true)
 
----- ML OneVsRest classification --------------
 
 import org.apache.spark.ml.classification.{LogisticRegression, OneVsRest}
 val lr = new LogisticRegression
@@ -145,6 +144,8 @@ val Array(trainingData, testData) = df6.randomSplit(Array(0.7,0.3),11L)
 
 trainingData.cache
 trainingData.count  // 14468
+
+---- ML OneVsRest classification --------------
 
 val ovrmodel = ovr.fit(trainingData)
 val pred = ovrmodel.transform(testData).cache
