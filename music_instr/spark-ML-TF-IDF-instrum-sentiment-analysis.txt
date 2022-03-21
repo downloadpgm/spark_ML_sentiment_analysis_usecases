@@ -1,0 +1,192 @@
+val music = spark.read.format("csv").option("quoteAll","true").option("header","true").load("music/music_instrm_review.csv")
+
+music.printSchema
+root
+ |-- reviewerID: string (nullable = true)
+ |-- asin: string (nullable = true)
+ |-- reviewerName: string (nullable = true)
+ |-- helpful: string (nullable = true)
+ |-- reviewText: string (nullable = true)
+ |-- overall: string (nullable = true)
+ |-- summary: string (nullable = true)
+ |-- unixReviewTime: string (nullable = true)
+ |-- reviewTime: string (nullable = true)
+
+music.groupBy("overall").count.show
++-------+-----+
+|overall|count|
++-------+-----+
+|    1.0|  217|
+|    5.0| 6938|
+|    4.0| 2084|
+|    2.0|  249|
+|    3.0|  772|
+|  2012"|    1|
++-------+-----+
+
+music.where("overall is null").count
+res2: Long = 0
+
+music.where("reviewText is null").count
+res3: Long = 7
+
+val df1 = music.select("reviewText", "overall").where("reviewText is not null").where(col("overall") =!= """ 2012"""")
+
+df1.printSchema
+root
+ |-- reviewText: string (nullable = true)
+ |-- overall: string (nullable = true)
+
+import org.apache.spark.ml.feature.RegexTokenizer
+val tokenizer = new RegexTokenizer().setInputCol("reviewText").setOutputCol("words").setPattern("""\W+""")
+val df2 = tokenizer.transform(df1)
+
+df2.select(explode('words).as("word")).distinct.count  // 20603
+
+// filter out numbers and tokens that are words mixed with numbers
+val filterNumbers = df2.select(explode('words).as("word")).where('word.rlike("^[0-9]*$")).distinct
+
+// lists tokens greather one-character length
+val tokenCountsFilteredSize = df2.select(explode('words).as("word")).where(length('word) === 1).distinct
+
+// remove terms with only one-occurrence
+val rareTokens = df2.select(explode('words).as("word")).groupBy('word).count.where('count === 1).select('word)
+
+// unioned all terms to be removed
+val wholeFilters = filterNumbers.union(tokenCountsFilteredSize).union(rareTokens).distinct.cache
+
+wholeFilters.count  // 9446
+
+wholeFilters.printSchema
+root
+ |-- word: string (nullable = true)
+ 
+val removedWords= wholeFilters.select("word").map( x => x.getString(0)).collect.toArray
+removedWords: Array[String] = Array(07, waters, hightly, microphoneis, shroud, danoelectro, mils, pools, lended, elocution, jamb, pinkwith, wilth, moonflowers, booooooooo, thedanelectro, frailing, 41l, thingee, facs, diodes, antennae, traditionalist, powershifter, liiiiiiiiike, smallclean, handicapped, reddish, giga, lightbecause, harzai, incustomer, lolyou, audiocodec, at4040, elevate, elongate, standquite, tunersnark, avoide, zoidszoid, rejuvenate, ardour2, priority, buitar, unlined, incoming, thwart, sr_1_2, biting, voyage, ipad2, chargercity, viewpoint, capoed, 800, 125, smelling, staff, m170, manualbody, pearloid, overpaying, serier, chuggin, palce, headliners, jazzer, construed, nasties, aound, thisgig, cleanings, latly, absurd, graphs, electo, copiesit, beverage, looseness, 720p,...
+
+// remove stop words
+import org.apache.spark.ml.feature.StopWordsRemover
+val enStopWords = StopWordsRemover.loadDefaultStopWords("english")
+val remover = new StopWordsRemover().setStopWords(enStopWords).
+setInputCol("words").
+setOutputCol("filteredStopWords")
+val df3 = remover.transform(df2)
+
+// total words after stopwords removal
+df3.select(explode('filteredStopWords).as("word")).distinct.count  // 20473
+
+// remove tokens collected in removedListWords
+import org.apache.spark.ml.feature.StopWordsRemover
+val remover = new StopWordsRemover().setStopWords(removedWords).
+setInputCol("filteredStopWords").
+setOutputCol("filtered")
+val df4 = remover.transform(df3)
+
+// total words relevant for analysis
+df4.select(explode('filtered).as("word")).distinct.count  // 11033
+
+val dim = math.pow(2, 14).toInt  // 16384
+
+import org.apache.spark.ml.feature.HashingTF
+val tf = new HashingTF().setInputCol("filtered").
+setOutputCol("TFOut").
+setNumFeatures(dim)
+val df5 = tf.transform(df4)
+
+import org.apache.spark.ml.feature.IDF
+val idf = new IDF().setInputCol("TFOut").setOutputCol("features")
+val idfModel = idf.fit(df5)
+val df6 = idfModel.transform(df5)
+
+df6.printSchema
+root
+ |-- reviewText: string (nullable = true)
+ |-- overall: string (nullable = true)
+ |-- words: array (nullable = true)
+ |    |-- element: string (containsNull = true)
+ |-- filteredStopWords: array (nullable = true)
+ |    |-- element: string (containsNull = true)
+ |-- filtered: array (nullable = true)
+ |    |-- element: string (containsNull = true)
+ |-- TFOut: vector (nullable = true)
+ |-- features: vector (nullable = true)
+
+
+import org.apache.spark.ml.feature.{StringIndexer}
+
+val resultStrIdx = new StringIndexer().setInputCol("overall").setOutputCol("label")
+val df7 = resultStrIdx.fit(df6).transform(df6)
+
+val Array(trainingData, testData) = df7.randomSplit(Array(0.7,0.3),11L)
+
+trainingData.cache
+trainingData.count  // 7251
+
+---- ML OneVsRest classification --------------
+
+import org.apache.spark.ml.classification.{LogisticRegression, OneVsRest}
+val lr = new LogisticRegression
+lr.setRegParam(0.01).setMaxIter(200).setFitIntercept(true)
+
+val ovr = new OneVsRest().setClassifier(lr)
+
+val ovrmodel = ovr.fit(trainingData)
+val pred = ovrmodel.transform(testData).cache
+
+import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
+val evaluator = new MulticlassClassificationEvaluator().setMetricName("accuracy")
+
+evaluator.evaluate(pred)  // 0.6252498334443705
+
+val predRDD = pred.select("prediction","label").rdd.map( row => (row(0).toString.toDouble,row(1).toString.toDouble)).cache
+
+predRDD.take(20)
+res27: Array[(Double, Double)] = Array((0.0,0.0), (2.0,1.0), (2.0,2.0), (0.0,0.0), (0.0,1.0), (0.0,2.0), (0.0,4.0), (0.0,0.0), (0.0,2.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (1.0,1.0), (0.0,0.0), (0.0,0.0), (0.0,1.0), (1.0,1.0), (1.0,0.0), (1.0,2.0), (0.0,0.0))
+
+import org.apache.spark.mllib.evaluation.MulticlassMetrics
+val metrics = new MulticlassMetrics(predRDD)
+
+predRDD.filter(x => x._1 == x._2).count  // 1877
+predRDD.count     // 3002
+metrics.accuracy  // 0.6252498334443705
+
+metrics.confusionMatrix
+res31: org.apache.spark.mllib.linalg.Matrix =
+1694.0  253.0  47.0  9.0  2.0
+445.0   150.0  25.0  6.0  5.0
+121.0   78.0   27.0  3.0  3.0
+42.0    18.0   6.0   2.0  2.0
+31.0    17.0   8.0   4.0  4.0
+
+
+---- ML Naive Bayes classification --------------
+
+import org.apache.spark.ml.classification.NaiveBayes
+val model = new NaiveBayes().fit(trainingData)
+
+val pred = model.transform(testData).cache
+
+import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
+val evaluator = new MulticlassClassificationEvaluator().setMetricName("accuracy")
+
+evaluator.evaluate(pred)  // 0.5919387075283145
+
+val predRDD = pred.select("prediction","label").rdd.map( row => (row(0).toString.toDouble,row(1).toString.toDouble)).cache
+
+predRDD.take(20)
+res33: Array[(Double, Double)] = Array((0.0,0.0), (2.0,1.0), (2.0,2.0), (0.0,0.0), (0.0,1.0), (0.0,2.0), (0.0,4.0), (0.0,0.0), (0.0,2.0), (1.0,0.0), (0.0,0.0), (2.0,0.0), (1.0,1.0), (0.0,0.0), (0.0,0.0), (0.0,1.0), (3.0,1.0), (0.0,0.0), (1.0,2.0), (0.0,0.0))
+
+import org.apache.spark.mllib.evaluation.MulticlassMetrics
+val metrics = new MulticlassMetrics(predRDD)
+
+predRDD.filter(x => x._1 == x._2).count  // 1777
+predRDD.count     // 3002
+metrics.accuracy  // 0.5919387075283145
+
+metrics.confusionMatrix
+res37: org.apache.spark.mllib.linalg.Matrix =
+1555.0  344.0  76.0  19.0  11.0
+406.0   173.0  43.0  5.0   4.0
+114.0   71.0   41.0  4.0   2.0
+40.0    16.0   11.0  3.0   0.0
+26.0    18.0   11.0  4.0   5.0

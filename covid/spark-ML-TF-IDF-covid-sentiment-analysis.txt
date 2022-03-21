@@ -9,46 +9,45 @@ root
  |-- TweetAt: string (nullable = true)
  |-- OriginalTweet: string (nullable = true)
  |-- Sentiment: string (nullable = true)
-: string (nullable = true)
+ |-- X: string (nullable = true)
 
 df.show
-+--------+----------+--------------------+----------+--------------------+-------------------+----+
-|UserName|ScreenName|            Location|   TweetAt|       OriginalTweet|          Sentiment|  X
-+--------+----------+--------------------+----------+--------------------+-------------------+----+
-|null|799|     48751|              London|16-03-2020|@MeNyrbie @Phil_G...|           Neutral
-|null|800|     48752|                  UK|16-03-2020|advice Talk to yo...|          Positive
-|null|801|     48753|           Vagabonds|16-03-2020|Coronavirus Austr...|          Positive
-|null|802|     48754|                null|16-03-2020|My food stock is ...|          Positive
-|null|803|     48755|                null|16-03-2020|Me, ready to go a...|Extremely Negative
-|null|804|     48756|ÜT: 36.319708,-82...|16-03-2020|As news of the re...|          Positive
-|null|805|     48757|35.926541,-78.753267|16-03-2020|Cashier at grocer...|          Positive
-|null|806|     48758|             Austria|16-03-2020|Was at the superm...|           Neutral
-|null|807|     48759|     Atlanta, GA USA|16-03-2020|Due to COVID-19 o...|          Positive
-|null|808|     48760|    BHAVNAGAR,GUJRAT|16-03-2020|For corona preven...|          Negative
-|null|809|     48761|      Makati, Manila|16-03-2020|All month there h...|           Neutral
-|null|810|     48762|Pitt Meadows, BC,...|16-03-2020|Due to the Covid-...|Extremely Positive
-|null|811|     48763|          Horningsea|16-03-2020|#horningsea is a ...|Extremely Positive
-|null|812|     48764|         Chicago, IL|16-03-2020|Me: I don't need ...|          Positive
-|null|813|     48765|                null|16-03-2020|ADARA Releases CO...|          Positive
-|null|814|     48766|      Houston, Texas|16-03-2020|Lines at the groc...|          Positive
-|null|815|     48767|        Saudi Arabia|16-03-2020|????? ????? ?????...|           Neutral
-|null|816|     48768|     Ontario, Canada|16-03-2020|@eyeonthearctic 1...|           Neutral
-|null|817|     48769|       North America|16-03-2020|Amazon Glitch Sty...|Extremely Positive
-|null|818|     48770|          Denver, CO|16-03-2020|For those who are...|          Positive
-+--------+----------+--------------------+----------+--------------------+-------------------+----+
++--------+----------+--------------------+----------+--------------------+------------------+----+
+|UserName|ScreenName|            Location|   TweetAt|       OriginalTweet|         Sentiment|   X|
++--------+----------+--------------------+----------+--------------------+------------------+----+
+|    3799|     48751|              London|16-03-2020|@MeNyrbie @Phil_G...|           Neutral|null|
+|    3800|     48752|                  UK|16-03-2020|advice Talk to yo...|          Positive|null|
+|    3801|     48753|           Vagabonds|16-03-2020|Coronavirus Austr...|          Positive|null|
+|    3802|     48754|                null|16-03-2020|My food stock is ...|          Positive|null|
+|    3803|     48755|                null|16-03-2020|Me, ready to go a...|Extremely Negative|null|
+|    3804|     48756|ÜT: 36.319708,-82...|16-03-2020|As news of the re...|          Positive|null|
+|    3805|     48757|35.926541,-78.753267|16-03-2020|Cashier at grocer...|          Positive|null|
+|    3806|     48758|             Austria|16-03-2020|Was at the superm...|           Neutral|null|
+|    3807|     48759|     Atlanta, GA USA|16-03-2020|Due to COVID-19 o...|          Positive|null|
+|    3808|     48760|    BHAVNAGAR,GUJRAT|16-03-2020|For corona preven...|          Negative|null|
+|    3809|     48761|      Makati, Manila|16-03-2020|All month there h...|           Neutral|null|
+|    3810|     48762|Pitt Meadows, BC,...|16-03-2020|Due to the Covid-...|Extremely Positive|null|
+|    3811|     48763|          Horningsea|16-03-2020|#horningsea is a ...|Extremely Positive|null|
+|    3812|     48764|         Chicago, IL|16-03-2020|Me: I don't need ...|          Positive|null|
+|    3813|     48765|                null|16-03-2020|ADARA Releases CO...|          Positive|null|
+|    3814|     48766|      Houston, Texas|16-03-2020|Lines at the groc...|          Positive|null|
+|    3815|     48767|        Saudi Arabia|16-03-2020|????? ????? ?????...|           Neutral|null|
+|    3816|     48768|     Ontario, Canada|16-03-2020|@eyeonthearctic 1...|           Neutral|null|
+|    3817|     48769|       North America|16-03-2020|Amazon Glitch Sty...|Extremely Positive|null|
+|    3818|     48770|          Denver, CO|16-03-2020|For those who are...|          Positive|null|
++--------+----------+--------------------+----------+--------------------+------------------+----+
 only showing top 20 rows
 
-
 df.groupBy("Sentiment").count.show
-+-------------------+-----+
-|          Sentiment|count|
-+-------------------+-----+
-| 6624|ely Positive
-| 9917|    Negative
-| 5481|ely Negative
-|11422|    Positive
-| 7713|     Neutral
-+-------------------+-----+
++------------------+-----+
+|         Sentiment|count|
++------------------+-----+
+|Extremely Negative| 5481|
+|           Neutral| 7713|
+|          Positive|11422|
+|          Negative| 9917|
+|Extremely Positive| 6624|
++------------------+-----+
 
 val df1 = df.select('OriginalTweet, 'Sentiment)
  
@@ -61,7 +60,7 @@ import org.apache.spark.ml.feature.RegexTokenizer
 val tokenizer = new RegexTokenizer().setInputCol("OriginalTweet").setOutputCol("words").setPattern("""\W+""")
 val df2 = tokenizer.transform(df1)
 
-df2.select(explode('words).as("word")).distinct.count  // 78988
+df2.select(explode('words).as("word")).distinct.count  // 78990
 
 // filter out numbers and tokens that are words mixed with numbers
 val filterNumbers = df2.select(explode('words).as("word")).where('word.rlike("^[0-9]*$")).distinct
@@ -75,7 +74,7 @@ val rareTokens = df2.select(explode('words).as("word")).groupBy('word).count.whe
 // unioned all terms to be removed
 val wholeFilters = filterNumbers.union(tokenCountsFilteredSize).union(rareTokens).distinct.cache
 
-wholeFilters.count  // 56172
+wholeFilters.count  // 56174
 
 wholeFilters.printSchema
 root
@@ -93,7 +92,7 @@ setOutputCol("filteredStopWords")
 val df3 = remover.transform(df2)
 
 // total words after stopwords removal
-df3.select(explode('filteredStopWords).as("word")).distinct.count  // 78857
+df3.select(explode('filteredStopWords).as("word")).distinct.count  // 78859
 
 // remove tokens collected in removedListWords
 import org.apache.spark.ml.feature.StopWordsRemover
@@ -137,6 +136,17 @@ import org.apache.spark.ml.feature.{StringIndexer}
 val resultStrIdx = new StringIndexer().setInputCol("Sentiment").setOutputCol("label")
 val df7 = resultStrIdx.fit(df6).transform(df6)
 
+df7.select('Sentiment, 'label).distinct.show
++------------------+-----+
+|         Sentiment|label|
++------------------+-----+
+|          Positive|  0.0|
+|          Negative|  1.0|
+|Extremely Negative|  4.0|
+|           Neutral|  2.0|
+|Extremely Positive|  3.0|
++------------------+-----+
+
 val Array(trainingData, testData) = df7.randomSplit(Array(0.7,0.3),11L)
 
 trainingData.cache
@@ -171,12 +181,12 @@ predRDD.count     // 12147
 metrics.accuracy  // 0.4706511895941385
 
 metrics.confusionMatrix
-res14: org.apache.spark.mllib.linalg.Matrix =
+res18: org.apache.spark.mllib.linalg.Matrix =
 1523.0  647.0   570.0   495.0  133.0
 726.0   1240.0  444.0   104.0  363.0
-494.0   471.0   1193.0  68.0   63.0
+494.0   470.0   1193.0  69.0   63.0
 718.0   134.0   99.0    973.0  38.0
-181.0   565.0   92.0    25.0   788.0
+180.0   566.0   92.0    25.0   788.0
 
 ---- ML Naive Bayes classification --------------
 

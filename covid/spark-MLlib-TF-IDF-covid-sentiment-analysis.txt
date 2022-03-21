@@ -10,58 +10,57 @@ root
  |-- TweetAt: string (nullable = true)
  |-- OriginalTweet: string (nullable = true)
  |-- Sentiment: string (nullable = true)
-: string (nullable = true)
+ |-- X: string (nullable = true)
 
 df.show
-+--------+----------+--------------------+----------+--------------------+-------------------+----+
-|UserName|ScreenName|            Location|   TweetAt|       OriginalTweet|          Sentiment|  X
-+--------+----------+--------------------+----------+--------------------+-------------------+----+
-|null|799|     48751|              London|16-03-2020|@MeNyrbie @Phil_G...|           Neutral
-|null|800|     48752|                  UK|16-03-2020|advice Talk to yo...|          Positive
-|null|801|     48753|           Vagabonds|16-03-2020|Coronavirus Austr...|          Positive
-|null|802|     48754|                null|16-03-2020|My food stock is ...|          Positive
-|null|803|     48755|                null|16-03-2020|Me, ready to go a...|Extremely Negative
-|null|804|     48756|ÜT: 36.319708,-82...|16-03-2020|As news of the re...|          Positive
-|null|805|     48757|35.926541,-78.753267|16-03-2020|Cashier at grocer...|          Positive
-|null|806|     48758|             Austria|16-03-2020|Was at the superm...|           Neutral
-|null|807|     48759|     Atlanta, GA USA|16-03-2020|Due to COVID-19 o...|          Positive
-|null|808|     48760|    BHAVNAGAR,GUJRAT|16-03-2020|For corona preven...|          Negative
-|null|809|     48761|      Makati, Manila|16-03-2020|All month there h...|           Neutral
-|null|810|     48762|Pitt Meadows, BC,...|16-03-2020|Due to the Covid-...|Extremely Positive
-|null|811|     48763|          Horningsea|16-03-2020|#horningsea is a ...|Extremely Positive
-|null|812|     48764|         Chicago, IL|16-03-2020|Me: I don't need ...|          Positive
-|null|813|     48765|                null|16-03-2020|ADARA Releases CO...|          Positive
-|null|814|     48766|      Houston, Texas|16-03-2020|Lines at the groc...|          Positive
-|null|815|     48767|        Saudi Arabia|16-03-2020|????? ????? ?????...|           Neutral
-|null|816|     48768|     Ontario, Canada|16-03-2020|@eyeonthearctic 1...|           Neutral
-|null|817|     48769|       North America|16-03-2020|Amazon Glitch Sty...|Extremely Positive
-|null|818|     48770|          Denver, CO|16-03-2020|For those who are...|          Positive
-+--------+----------+--------------------+----------+--------------------+-------------------+----+
++--------+----------+--------------------+----------+--------------------+------------------+----+
+|UserName|ScreenName|            Location|   TweetAt|       OriginalTweet|         Sentiment|   X|
++--------+----------+--------------------+----------+--------------------+------------------+----+
+|    3799|     48751|              London|16-03-2020|@MeNyrbie @Phil_G...|           Neutral|null|
+|    3800|     48752|                  UK|16-03-2020|advice Talk to yo...|          Positive|null|
+|    3801|     48753|           Vagabonds|16-03-2020|Coronavirus Austr...|          Positive|null|
+|    3802|     48754|                null|16-03-2020|My food stock is ...|          Positive|null|
+|    3803|     48755|                null|16-03-2020|Me, ready to go a...|Extremely Negative|null|
+|    3804|     48756|ÜT: 36.319708,-82...|16-03-2020|As news of the re...|          Positive|null|
+|    3805|     48757|35.926541,-78.753267|16-03-2020|Cashier at grocer...|          Positive|null|
+|    3806|     48758|             Austria|16-03-2020|Was at the superm...|           Neutral|null|
+|    3807|     48759|     Atlanta, GA USA|16-03-2020|Due to COVID-19 o...|          Positive|null|
+|    3808|     48760|    BHAVNAGAR,GUJRAT|16-03-2020|For corona preven...|          Negative|null|
+|    3809|     48761|      Makati, Manila|16-03-2020|All month there h...|           Neutral|null|
+|    3810|     48762|Pitt Meadows, BC,...|16-03-2020|Due to the Covid-...|Extremely Positive|null|
+|    3811|     48763|          Horningsea|16-03-2020|#horningsea is a ...|Extremely Positive|null|
+|    3812|     48764|         Chicago, IL|16-03-2020|Me: I don't need ...|          Positive|null|
+|    3813|     48765|                null|16-03-2020|ADARA Releases CO...|          Positive|null|
+|    3814|     48766|      Houston, Texas|16-03-2020|Lines at the groc...|          Positive|null|
+|    3815|     48767|        Saudi Arabia|16-03-2020|????? ????? ?????...|           Neutral|null|
+|    3816|     48768|     Ontario, Canada|16-03-2020|@eyeonthearctic 1...|           Neutral|null|
+|    3817|     48769|       North America|16-03-2020|Amazon Glitch Sty...|Extremely Positive|null|
+|    3818|     48770|          Denver, CO|16-03-2020|For those who are...|          Positive|null|
++--------+----------+--------------------+----------+--------------------+------------------+----+
 only showing top 20 rows
 
-
 df.groupBy("Sentiment").count.show
-+-------------------+-----+
-|          Sentiment|count|
-+-------------------+-----+
-| 6624|ely Positive
-| 9917|    Negative
-| 5481|ely Negative
-|11422|    Positive
-| 7713|     Neutral
-+-------------------+-----+
++------------------+-----+
+|         Sentiment|count|
++------------------+-----+
+|Extremely Negative| 5481|
+|           Neutral| 7713|
+|          Positive|11422|
+|          Negative| 9917|
+|Extremely Positive| 6624|
++------------------+-----+
 
 val rdd = df.select('OriginalTweet, 'Sentiment).rdd
 
 val rdd1 = rdd.map( x => x.toSeq.toArray ).map( x => Array(x(0).toString, x(1).toString))
 
 val categories = rdd1.map(x => x(1)).distinct.zipWithIndex.collectAsMap
-" -> 4) "Positivey Negativen.Map[String,Long] = Map("Negative
+categories: scala.collection.Map[String,Long] = Map(Extremely Negative -> 1, Positive -> 0, Negative -> 3, Neutral -> 4, Extremely Positive -> 2)
 
 -- remove nonword characters (such as punctuation).
 val nonWordSplit = rdd1.flatMap(x => x(0).split("""\W+""").map(_.toLowerCase))
 nonWordSplit.sample(true, 0.3, 42).take(20).mkString(",")
-nonWordSplit.distinct.count  // 78989
+nonWordSplit.distinct.count  // 78991
 
 -- filter out numbers and tokens that are words mixed with numbers
 val regex = """[^0-9]*""".r
@@ -162,17 +161,18 @@ res27: Array[(Double, Double)] = Array((4.0,4.0), (4.0,4.0), (1.0,1.0), (0.0,3.0
 
 import org.apache.spark.mllib.evaluation.MulticlassMetrics
 val metrics = new MulticlassMetrics(validPredicts)
-validPredicts.filter(x => x._1 == x._2).count  // 5163
+validPredicts.filter(x => x._1 == x._2).count  // 5450
 validPredicts.count                            // 12147
 val accuracy = metrics.accuracy   // 0.42504322054828353
 
 metrics.confusionMatrix
-res30: org.apache.spark.mllib.linalg.Matrix =
-622.0  589.0   47.0   157.0   175.0
-412.0  1124.0  221.0  521.0   634.0
-32.0   188.0   929.0  101.0   721.0
-80.0   503.0   137.0  1082.0  508.0
-141.0  663.0   640.0  514.0   1406.0
+res40: org.apache.spark.mllib.linalg.Matrix =
+1454.0  183.0  605.0  620.0   502.0
+106.0   752.0  29.0   587.0   116.0
+643.0   56.0   995.0  162.0   115.0
+588.0   579.0  136.0  1143.0  466.0
+446.0   130.0  121.0  507.0   1106.0
+
 
 ---- MLlib Naive Bayes regression --------------
 
@@ -182,7 +182,7 @@ val model = NaiveBayes.train(train)
 val validPredicts =  test.map(p => (model.predict(p.features),p.label))
 
 validPredicts.take(20)
-res31: Array[(Double, Double)] = Array((4.0,4.0), (0.0,4.0), (2.0,1.0), (3.0,3.0), (1.0,2.0), (2.0,2.0), (3.0,3.0), (2.0,2.0), (2.0,2.0), (3.0,2.0), (1.0,4.0), (4.0,4.0), (0.0,0.0), (0.0,4.0), (3.0,3.0), (4.0,3.0), (4.0,3.0), (4.0,4.0), (1.0,1.0), (4.0,4.0))
+res41: Array[(Double, Double)] = Array((0.0,0.0), (1.0,0.0), (2.0,3.0), (4.0,4.0), (3.0,2.0), (2.0,2.0), (4.0,4.0), (2.0,2.0), (2.0,2.0), (4.0,2.0), (3.0,0.0), (0.0,0.0), (1.0,1.0), (1.0,0.0), (4.0,4.0), (0.0,4.0), (0.0,4.0), (0.0,0.0), (3.0,3.0), (0.0,0.0))
 
 import org.apache.spark.mllib.evaluation.MulticlassMetrics
 val metrics = new MulticlassMetrics(validPredicts)
@@ -191,12 +191,12 @@ validPredicts.count                            // 12147
 val accuracy = metrics.accuracy   // 0.4308059603194204
 
 metrics.confusionMatrix
-res34: org.apache.spark.mllib.linalg.Matrix =
-802.0  513.0   59.0    72.0    144.0
-610.0  1104.0  254.0   338.0   606.0
-76.0   192.0   1012.0  89.0    602.0
-141.0  426.0   206.0   1055.0  482.0
-256.0  643.0   791.0   414.0   1260.0
+res44: org.apache.spark.mllib.linalg.Matrix =
+1260.0  256.0  791.0   643.0   414.0
+144.0   802.0  59.0    513.0   72.0
+602.0   76.0   1012.0  192.0   89.0
+606.0   610.0  254.0   1104.0  338.0
+482.0   141.0  206.0   426.0   1055.0
 
 ---- MLlib Kmeans clustering --------------
 
