@@ -1,38 +1,73 @@
----- Preprocessing files to adjust layout --------------
 
-val fake_txt = sc.textFile("hdfs://a3b2e86b38cb:9000/data/Fake.csv").filter( x => x.length > 0).map( x => {
-   if (x(0) == ' ') "\"" + x.replaceFirst(",\"","\",\"")
-   else x
- })
- 
-fake_txt.map( x => x.replaceAll("\"\"","")).saveAsTextFile("hdfs://a3b2e86b38cb:9000/data/fake_news.csv")
+val true_rdd = sc.textFile("hdfs://hdpmst:9000/data/True.csv")
 
-val real_txt = sc.textFile("hdfs://a3b2e86b38cb:9000/data/True.csv").filter( x => x.length > 0).map( x => {
-   if (x(0) == ' ') "\"" + x.replaceFirst(",\"","\",\"")
-   else x
- })
- 
-real_txt.map( x => x.replaceAll("\"\"",""))saveAsTextFile("hdfs://a3b2e86b38cb:9000/data/true_news.csv")
+val true_rdd1 = true_rdd.map( x => x.replaceAll("\"\"","") )
 
-val fake_news = spark.read.format("csv").option("sep",",").option("quoteAll","true").option("header","true").
-                      load("hdfs://a3b2e86b38cb:9000/data/fake_news.csv").where("text is not null")
+true_rdd1.saveAsTextFile("hdfs://hdpmst:9000/data/True1.csv")
 
-val true_news = spark.read.format("csv").option("sep",",").option("quoteAll","true").option("header","true").
-                      load("hdfs://a3b2e86b38cb:9000/data/true_news.csv").where("text is not null")
+val true_news = spark.read.option("inferSchema","true").option("header","true").csv("hdfs://hdpmst:9000/data/True1.csv")
 
-fake_news.printSchema
-root
- |-- title: string (nullable = true)
- |-- text: string (nullable = true)
- |-- subject: string (nullable = true)
- |-- date: string (nullable = true)
+true_news.show
++--------------------+--------------------+------------+------------------+
+|               title|                text|     subject|              date|
++--------------------+--------------------+------------+------------------+
+|As U.S. budget fi...|WASHINGTON (Reute...|politicsNews|December 31, 2017 |
+|U.S. military to ...|WASHINGTON (Reute...|politicsNews|December 29, 2017 |
+|Senior U.S. Repub...|WASHINGTON (Reute...|politicsNews|December 31, 2017 |
+|FBI Russia probe ...|WASHINGTON (Reute...|politicsNews|December 30, 2017 |
+|Trump wants Posta...|SEATTLE/WASHINGTO...|politicsNews|December 29, 2017 |
+|White House, Cong...|WEST PALM BEACH, ...|politicsNews|December 29, 2017 |
+|Trump says Russia...|WEST PALM BEACH, ...|politicsNews|December 29, 2017 |
+|Factbox: Trump on...|The following sta...|politicsNews|December 29, 2017 |
+|Trump on Twitter ...|The following sta...|politicsNews|December 29, 2017 |
+|Alabama official ...|WASHINGTON (Reute...|politicsNews|December 28, 2017 |
+|Jones certified U...|(Reuters) - Alaba...|politicsNews|December 28, 2017 |
+|New York governor...|NEW YORK/WASHINGT...|politicsNews|December 28, 2017 |
+|Factbox: Trump on...|The following sta...|politicsNews|December 28, 2017 |
+|Trump on Twitter ...|The following sta...|politicsNews|December 28, 2017 |
+|Man says he deliv...| (In Dec. 25 stor...|politicsNews|December 25, 2017 |
+|Virginia official...|(Reuters) - A lot...|politicsNews|December 27, 2017 |
+|U.S. lawmakers qu...|WASHINGTON (Reute...|politicsNews|December 27, 2017 |
+|Trump on Twitter ...|The following sta...|politicsNews|December 26, 2017 |
+|U.S. appeals cour...|(Reuters) - A U.S...|politicsNews|December 26, 2017 |
+|Treasury Secretar...|(Reuters) - A gif...|politicsNews|December 24, 2017 |
++--------------------+--------------------+------------+------------------+
+only showing top 20 rows
 
-true_news.printSchema
-root
- |-- title: string (nullable = true)
- |-- text: string (nullable = true)
- |-- subject: string (nullable = true)
- |-- date: string (nullable = true)
+
+val fake_rdd = sc.textFile("hdfs://hdpmst:9000/data/Fake.csv")
+
+val fake_rdd1 = fake_rdd.map( x => x.replaceAll("\"\"","") )
+
+fake_rdd1.saveAsTextFile("hdfs://hdpmst:9000/data/Fake1.csv")                                                                                
+val fake_news = spark.read.option("inferSchema","true").option("header","true").csv("hdfs://hdpmst:9000/data/Fake1.csv")
+
+fake_news.show
++--------------------+--------------------+-------+-----------------+
+|               title|                text|subject|             date|
++--------------------+--------------------+-------+-----------------+
+| Donald Trump Sen...|Donald Trump just...|   News|December 31, 2017|
+| Drunk Bragging T...|House Intelligenc...|   News|December 31, 2017|
+| Sheriff David Cl...|On Friday, it was...|   News|December 30, 2017|
+| Trump Is So Obse...|On Christmas day,...|   News|December 29, 2017|
+| Pope Francis Jus...|Pope Francis used...|   News|December 25, 2017|
+| Racist Alabama C...|The number of cas...|   News|December 25, 2017|
+| Fresh Off The Go...|Donald Trump spen...|   News|December 23, 2017|
+| Trump Said Some ...|In the wake of ye...|   News|December 23, 2017|
+| Former CIA Direc...|Many people have ...|   News|December 22, 2017|
+| WATCH: Brand-New...|Just when you mig...|   News|December 21, 2017|
+| Papa John?s Foun...|A centerpiece of ...|   News|December 21, 2017|
+| WATCH: Paul Ryan...|Republicans are w...|   News|December 21, 2017|
+| Bad News For Tru...|Republicans have ...|   News|December 21, 2017|
+| WATCH: Lindsey G...|The media has bee...|   News|December 20, 2017|
+| Heiress To Disne...|Abigail Disney is...|   News|December 20, 2017|
+| Tone Deaf Trump:...|Donald Trump just...|   News|December 20, 2017|
+| The Internet Bru...|A new animatronic...|   News|December 19, 2017|
+| Mueller Spokesma...|Trump supporters ...|   News|December 17, 2017|
+| SNL Hilariously ...|Right now, the wh...|   News|December 17, 2017|
+| Republican Senat...|Senate Majority W...|   News|December 16, 2017|
++--------------------+--------------------+-------+-----------------+
+only showing top 20 rows
  
 val true_df = true_news.select(lit(1).as("label"), 'text)
 
@@ -40,14 +75,12 @@ val fake_df = fake_news.select(lit(0).as("label"), 'text)
 
 val df1 = true_df.union(fake_df)
 
-scala> df1.printSchema
+df1.printSchema
 root
  |-- label: integer (nullable = false)
  |-- text: string (nullable = true)
 
-val rdd1 = df1.select('text, 'label).rdd.map( x => x.toSeq.toArray )
-
-val rdd = rdd1.map( x => x.map( y => y.toString ))
+val rdd = df1.select('text, 'label).rdd.map( x => x.toSeq.toArray )
 
 
 -- remove nonword characters (such as punctuation).

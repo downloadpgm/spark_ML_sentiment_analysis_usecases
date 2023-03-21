@@ -25,7 +25,7 @@ df2.select(explode('words).as("word")).distinct.count  // 259143
 // filter out numbers and tokens that are words mixed with numbers
 val filterNumbers = df2.select(explode('words).as("word")).where('word.rlike("^[0-9]*$")).distinct
 
-// lists tokens greather one-character length
+// lists tokens with one-character length
 val tokenCountsFilteredSize = df2.select(explode('words).as("word")).where(length('word) === 1).distinct
 
 // remove terms with only one-occurrence
@@ -111,7 +111,7 @@ val evaluator = new MulticlassClassificationEvaluator().setMetricName("accuracy"
 
 evaluator.evaluate(pred)  // 0.864163050886905
 
-val predRDD = pred.select("prediction","label").rdd.map( row => (row(0).toString.toDouble,row(1).toString.toDouble)).cache
+val predRDD = pred.select("prediction","label").rdd.map( row => (row.getDouble(0),row.getInt(1).toDouble)).cache
 
 predRDD.take(20)
 res7: Array[(Double, Double)] = Array((1.0,1.0), (1.0,1.0), (0.0,0.0), (1.0,1.0), (1.0,1.0), (0.0,0.0), (1.0,1.0), (1.0,1.0), (0.0,0.0), (1.0,1.0), (1.0,1.0), (1.0,1.0), (1.0,0.0), (1.0,1.0),(1.0,1.0), (1.0,1.0), (1.0,1.0), (1.0,1.0), (1.0,1.0), (1.0,1.0))
