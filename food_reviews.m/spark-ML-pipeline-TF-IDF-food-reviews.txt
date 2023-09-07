@@ -1,0 +1,217 @@
+
+val df = spark.read.option("inferSchema","true").option("header","true").csv("hdfs://hdpmst:9000/data/reviews")
+
+df.printSchema
+root
+ |-- Id: integer (nullable = true)
+ |-- ProductId: string (nullable = true)
+ |-- UserId: string (nullable = true)
+ |-- ProfileName: string (nullable = true)
+ |-- HelpfulnessNumerator: integer (nullable = true)
+ |-- HelpfulnessDenominator: integer (nullable = true)
+ |-- Score: integer (nullable = true)
+ |-- Time: integer (nullable = true)
+ |-- Summary: string (nullable = true)
+ |-- Text: string (nullable = true)
+
+df.rdd.getNumPartitions
+res0: Int = 3
+
+df.groupBy('Score).count.show(false)
++-----+------+                                                                  
+|Score|count |
++-----+------+
+|null |2     |
+|1    |52268 |
+|3    |42639 |
+|5    |363119|
+|4    |80655 |
+|2    |29769 |
++-----+------+
+
+import org.apache.spark.sql.types._
+val dfn = df.where("Score is not null").select('Text,expr("Score - 1").cast(DoubleType).as("label")).distinct
+
+dfn.groupBy("label").count.show
++-----+------+                                                                  
+|label| count|
++-----+------+
+|  0.0| 36279|
+|  4.0|250744|
+|  1.0| 20804|
+|  3.0| 56074|
+|  2.0| 29772|
++-----+------+
+
+spark.conf.set("spark.sql.shuffle.partitions", 12)
+
+import org.apache.spark.ml.feature.RegexTokenizer
+val tokenizer = new RegexTokenizer().setInputCol("Text").setOutputCol("words").setPattern("""\W+""")
+
+import org.apache.spark.ml.feature.SQLTransformer
+
+val sql_explode = new SQLTransformer().setStatement("SELECT EXPLODE(words) AS word FROM __THIS__")
+
+val regex_chknum = (word:String) => word.matches(".*\\d+.*")
+spark.udf.register("regex_chknum",regex_chknum)
+
+val sql = new SQLTransformer().setStatement("""
+-- get tokens with one-character length
+SELECT word FROM __THIS__ WHERE LENGTH(word) = 1   
+UNION
+-- remove terms with only one-occurrence
+SELECT word FROM __THIS__ GROUP BY word HAVING COUNT(*) = 1  
+UNION
+-- filter out numbers and tokens that are words mixed with numbers
+SELECT word FROM __THIS__ WHERE regex_chknum(word)   
+""")
+
+import org.apache.spark.ml.Pipeline
+val pipeline = new Pipeline().setStages(Array(tokenizer,sql_explode,sql))
+
+val model = pipeline.fit(dfn)
+
+val wholeFilters = model.transform(dfn)
+
+wholeFilters.count  // 61584
+
+val removedWords = wholeFilters.select("word").map( x => x.getString(0)).collect.toArray
+
+
+// remove stop words
+import org.apache.spark.ml.feature.StopWordsRemover
+val enStopWords = StopWordsRemover.loadDefaultStopWords("english")
+val remover = new StopWordsRemover().setStopWords(enStopWords).
+setInputCol("words").
+setOutputCol("filteredStopWords")
+
+// remove tokens collected in removedListWords
+import org.apache.spark.ml.feature.StopWordsRemover
+val remover_sql = new StopWordsRemover().setStopWords(removedWords).
+setInputCol("filteredStopWords").
+setOutputCol("filtered")
+
+val dim = math.pow(2, 17).toInt  // 131072
+
+import org.apache.spark.ml.feature.HashingTF
+val tf = new HashingTF().setInputCol("filtered").
+setOutputCol("TFOut").
+setNumFeatures(dim)
+
+import org.apache.spark.ml.feature.IDF
+val idf = new IDF().setInputCol("TFOut").setOutputCol("features")
+
+import org.apache.spark.ml.classification.{LogisticRegression, OneVsRest}
+val lr = new LogisticRegression
+lr.setRegParam(0.01).setMaxIter(100).setFitIntercept(true)
+
+val ovr = new OneVsRest().setClassifier(lr)
+
+val pipeline1 = new Pipeline().setStages(Array(tokenizer,remover,remover_sql,tf,idf,ovr))
+
+val Array(trainingData, testData) = dfn.randomSplit(Array(0.7,0.3),11L)
+
+trainingData.cache
+trainingData.count  // 275775
+
+val model1 = pipeline1.fit(trainingData)
+
+val pred = model1.transform(testData)
+
+pred.select('label, 'prediction).show
++-----+----------+                                                              
+|label|prediction|
++-----+----------+
+|  0.0|       4.0|
+|  4.0|       4.0|
+|  0.0|       4.0|
+|  1.0|       4.0|
+|  4.0|       4.0|
+|  4.0|       4.0|
+|  3.0|       2.0|
+|  0.0|       3.0|
+|  4.0|       4.0|
+|  3.0|       3.0|
+|  4.0|       4.0|
+|  4.0|       4.0|
+|  1.0|       3.0|
+|  1.0|       1.0|
+|  4.0|       4.0|
+|  4.0|       4.0|
+|  4.0|       4.0|
+|  3.0|       4.0|
+|  4.0|       2.0|
+|  3.0|       4.0|
++-----+----------+
+only showing top 20 rows
+
+import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
+val evaluator = new MulticlassClassificationEvaluator().setMetricName("accuracy")
+
+evaluator.evaluate(pred)  // 0.6902322346435054
+
+val predRDD = pred.select("prediction","label").rdd.map( row => (row.getDouble(0),row.getDouble(1))).cache
+
+import org.apache.spark.mllib.evaluation.MulticlassMetrics
+val metrics = new MulticlassMetrics(predRDD)
+
+predRDD.filter(x => x._1 == x._2).count  // 81377
+predRDD.count     // 117898
+metrics.accuracy  // 0.6902322346435054
+
+metrics.confusionMatrix
+res25: org.apache.spark.mllib.linalg.Matrix =                                   
+5950.0  668.0  568.0   472.0   3329.0
+1512.0  709.0  944.0   620.0   2434.0
+880.0   626.0  1708.0  1632.0  4046.0
+418.0   266.0  996.0   3457.0  11615.0
+837.0   409.0  960.0   3289.0  69553.0
+
+model1.write.save("hdfs://hdpmst:9000/model/reviews")
+
+
+---------------
+
+import org.apache.spark.ml.PipelineModel
+val model = PipelineModel.load("hdfs://hdpmst:9000/model/reviews")
+
+val df = spark.read.option("inferSchema","true").option("header","true").csv("hdfs://hdpmst:9000/data/reviews")
+
+import org.apache.spark.sql.types._
+val dfn = df.where("Score is not null").select('Text,expr("Score - 1").cast(DoubleType).as("label")).distinct
+
+val Array(trainingData, testData) = dfn.randomSplit(Array(0.7,0.3),11L)
+
+trainingData.cache
+trainingData.count  // 275775
+
+spark.conf.set("spark.sql.shuffle.partitions",12)
+
+val pred = model.transform(testData)
+
+pred.select('label, 'prediction).show
++-----+----------+                                                              
+|label|prediction|
++-----+----------+
+|  0.0|       4.0|
+|  4.0|       4.0|
+|  0.0|       4.0|
+|  1.0|       4.0|
+|  4.0|       4.0|
+|  4.0|       4.0|
+|  3.0|       2.0|
+|  0.0|       3.0|
+|  4.0|       4.0|
+|  3.0|       3.0|
+|  4.0|       4.0|
+|  4.0|       4.0|
+|  1.0|       3.0|
+|  1.0|       1.0|
+|  4.0|       4.0|
+|  4.0|       4.0|
+|  4.0|       4.0|
+|  3.0|       4.0|
+|  4.0|       2.0|
+|  3.0|       4.0|
++-----+----------+
+only showing top 20 rows

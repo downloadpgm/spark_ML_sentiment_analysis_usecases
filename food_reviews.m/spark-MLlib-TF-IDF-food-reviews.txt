@@ -1,0 +1,210 @@
+val rdd = sc.textFile("food_reviews/Reviews.csv")
+
+val rdd1 = rdd.map(x => x.replaceAll("\"\"",""))
+
+rdd1.saveAsTextFile("food_reviews/food_reviews.csv")
+
+val df = spark.read.format("csv").option("quoteAll","true").load("food_reviews/food_reviews.csv").toDF("Id","ProductId","UserId","ProfileName","HelpfulnessNumerator","HelpfulnessDenominator","Score","Time","Summary","Text")
+df: org.apache.spark.sql.DataFrame = [Id: string, ProductId: string ... 8 more fields]
+
+df.printSchema
+root
+ |-- Id: integer (nullable = true)
+ |-- ProductId: string (nullable = true)
+ |-- UserId: string (nullable = true)
+ |-- ProfileName: string (nullable = true)
+ |-- HelpfulnessNumerator: string (nullable = true)
+ |-- HelpfulnessDenominator: string (nullable = true)
+ |-- Score: string (nullable = true)
+ |-- Time: string (nullable = true)
+ |-- Summary: string (nullable = true)
+ |-- Text: string (nullable = true)
+
+
+df.show
++------+----------+--------------+--------------------+--------------------+----------------------+-----+----------+--------------------+--------------------+
+|    Id| ProductId|        UserId|         ProfileName|HelpfulnessNumerator|HelpfulnessDenominator|Score|      Time|             Summary|                Text|
++------+----------+--------------+--------------------+--------------------+----------------------+-----+----------+--------------------+--------------------+
+|250074|B0029NII3C|A2830ZHYJP2J1U|            B. Grove|                   0|                     0|    3|1338595200| Normally a favorite|I like the food i...|
+|250075|B0029NII3C|A2I6FFCUE6KID9|Stone Maven Stone...|                   0|                     0|    5|1338422400|Picky cat loves this|I have a cat with...|
+|250076|B0029NII3C| ASALATXVOO93K|       OC Mom OC Mom|                   0|                     0|    3|1337040000|My cats love this...|My 2 cats are pic...|
+|250077|B0029NII3C| AY248XZFR20X8| Trisha Neuschwander|                   0|                     0|    5|1335312000|      Kitty Loves It|I have looked for...|
+|250078|B0029NII3C|A3KAB2WMDVS6S3|Doug Kueffler Gru...|                   0|                     0|    5|1334016000|Whiskas Tuna Entr...|After Wal-mart di...|
+|250079|B0029NII3C|A19QLFHBU1GXTQ| Dale T. Jenkins DTJ|                   0|                     0|    5|1333497600|My Cat's Favorite...|Sir Flip loves th...|
+|250080|B0029NII3C|A3MYCJU91K48FM|Judith A. Reed ju...|                   0|                     0|    5|1332633600|            Cat food|Although serving ...|
+|250081|B0029NII3C|A26JYIPTHH25VC|                Moto|                   0|                     0|    5|1331424000|      A cat delicacy|My Kitties(Tuffy ...|
+|250082|B0029NII3C|A17LIW1UGS6IKT|      Paul F. Austin|                   0|                     0|    5|1329004800|Our cats love thi...|The Whiskas Purrf...|
+|250083|B0029NII3C| ATI8X8CPAU5N6|Eleanor Martin bo...|                   0|                     0|    5|1328486400|      Pleasing Molly|Molly wakes me up...|
+|250084|B0029NII3C| AYAH5HYV62EXV|    Connie S. Miller|                   0|                     0|    5|1327622400|Just what The Cat...|The Cat will not ...|
+|250085|B0029NII3C|A3IINUJ0L32ZR0|       Barbara Dewey|                   0|                     0|    5|1326672000|           very good|I have a very old...|
+|250086|B0029NII3C|A12BTR2MVK2BR5|             xenofan|                   0|                     0|    4|1326412800|my cat prefers th...|My cat is a fussy...|
+|250087|B0029NII3C|A1IPZ9ATPDR56O|              G Gina|                   0|                     0|    5|1324425600|        its all good|I have 2 cats who...|
+|250088|B0029NII3C| ABQXS84HVNC1N|D. Brenner gift g...|                   0|                     0|    5|1323475200|   Purrfectly great.|My cat was allerg...|
+|250089|B0029NII3C|A1NK7L4ZS8CNWH|        R. A. Hoerst|                   0|                     0|    3|1323302400|cat rejected one ...|I like the conven...|
+|250090|B0029NII3C|A2LEA8LWF8G2U9|       Meowin' Kitty|                   0|                     0|    5|1321056000|Whiskas Purrfectl...|Exactly what I ne...|
+|250091|B0029NII3C| AGVHHNGCXSUJE|            Cat Mama|                   0|                     0|    4|1319155200|Our kitties love ...|We have two very ...|
+|250092|B0029NII3C| A1RET8URKV6NV|              Melvin|                   0|                     0|    5|1318896000|My Cat Loves Whis...|Cats can be very ...|
+|250093|B0029NII3C|A3P8CU9874SRK5|        C. christine|                   0|                     0|    2|1316649600|Unwanted Ingredients|I was interested ...|
++------+----------+--------------+--------------------+--------------------+----------------------+-----+----------+--------------------+--------------------+
+only showing top 20 rows
+
+
+import org.apache.spark.sql.types._
+
+val df1 = df.where('HelpfulnessNumerator =!= "HelpfulnessNumerator").select(('Score.cast(DoubleType)-1).as("label"), 'Text)
+df1: org.apache.spark.sql.DataFrame = [label: double, Text: string]
+
+df1.groupBy("label").count.show
++-----+------+                                                                  
+|label| count|
++-----+------+
+|  0.0| 52268|
+|  1.0| 29769|
+|  4.0|363120|
+|  3.0| 80655|
+|  2.0| 42640|
++-----+------+
+
+val rdd = df1.select("label","Text").rdd.map( x => Array(x(1).toString,x(0).toString))
+
+-- remove nonword characters (such as punctuation).
+val nonWordSplit = rdd.flatMap(x => x(0).split("""\W+""").map(_.toLowerCase))
+nonWordSplit.sample(true, 0.3, 42).take(20).mkString(",")
+nonWordSplit.distinct.count  // 120383
+
+-- filter out numbers and tokens that are words mixed with numbers
+val regex = """[^0-9]*""".r
+val filterNumbers = nonWordSplit.filter(token => regex.pattern.matcher(token).matches)
+filterNumbers.distinct.sample(false, 0.3, 42).take(20).mkString("\n")
+filterNumbers.distinct.count  // 106816
+
+-- list highest occurrence of words to get an idea which stop words to be removed
+val tokenCounts = filterNumbers.map(t => (t, 1)).reduceByKey(_ + _)
+val orderingDesc = Ordering.by[(String, Int), Int](_._2)
+tokenCounts.top(20)(orderingDesc).mkString("\n")
+
+-- remove stop words
+import org.apache.spark.ml.feature.StopWordsRemover
+val stopwords = StopWordsRemover.loadDefaultStopWords("english")
+val tokenCountsFilteredStopwords = tokenCounts.filter { case(k, v) => !stopwords.contains(k) }
+tokenCountsFilteredStopwords.top(20)(orderingDesc).mkString("\n")
+
+-- remove tokens with one-character length
+val tokenCountsFilteredSize = tokenCountsFilteredStopwords.filter { case (k, v) => k.size >= 2 }
+tokenCountsFilteredSize.top(20)(orderingDesc).mkString("\n")
+
+-- list terms with only one-occurrence
+val orderingAsc = Ordering.by[(String, Int), Int](-_._2)
+tokenCountsFilteredSize.top(20)(orderingAsc).mkString("\n")
+
+-- remove terms with only one-occurrence
+val rareTokens = tokenCounts.filter{ case (k, v) => v < 2 }.map{ case (k, v) => k }.collect.toSet
+val tokenCountsFilteredAll = tokenCountsFilteredSize.filter { case (k, v) => !rareTokens.contains(k) }
+tokenCountsFilteredAll.top(20)(orderingAsc).mkString("\n")
+
+tokenCountsFilteredAll.count  // 64878
+
+def tokenize(line: String): Seq[String] = {
+ line.split("""\W+""")
+ .map(_.toLowerCase)
+ .filter(token => regex.pattern.matcher(token).matches)
+ .filterNot(token => stopwords.contains(token))
+ .filterNot(token => rareTokens.contains(token))
+ .filter(token => token.size >= 2)
+ .toSeq
+}
+
+rdd.flatMap(x => tokenize(x(0))).distinct.count  // 64878
+
+
+val sets = rdd.randomSplit(Array(0.7,0.3), 11L)
+val trainSet = sets(0)
+val testSet = sets(1)
+
+val tokens = trainSet.map(x => tokenize(x(0)))
+tokens.cache
+tokens.first.take(20)
+
+---------------------------
+
+import org.apache.spark.mllib.linalg.{ SparseVector => SV }
+import org.apache.spark.mllib.feature.HashingTF
+import org.apache.spark.mllib.feature.IDF
+
+val dim = math.pow(2, 17).toInt  // 131072
+val hashingTF = new HashingTF(dim)
+
+-- transform function of HashingTF maps each input document (that is, a sequence of tokens) to an MLlib Vector.
+val trainTf = trainSet.map(x => hashingTF.transform(tokenize(x(0))))
+trainTf.cache
+
+-- compute the inverse document frequency for each term in the corpus
+-- by creating a new IDF instance and calling fit with our RDD of term frequency
+-- vectors as the input.
+
+val idf = new IDF().fit(trainTf)
+val trainTfIdf = idf.transform(trainTf)
+
+--------------------------------
+
+import org.apache.spark.mllib.regression.LabeledPoint
+
+val zipTrain = trainSet.zip(trainTfIdf)
+val train = zipTrain.map{ case(dset,vector) => LabeledPoint(dset(1).toDouble,vector) }
+train.cache
+
+val testTf = testSet.map(x => hashingTF.transform(tokenize(x(0))))
+val testTfIdf = idf.transform(testTf)
+
+val zipTest = testSet.zip(testTfIdf)
+val test = zipTest.map{ case(dset,vector) => LabeledPoint(dset(1).toDouble,vector) }
+test.cache
+
+---- Multiclass logistic regression --------------
+
+import org.apache.spark.mllib.classification.{LogisticRegressionModel, LogisticRegressionWithLBFGS}
+val numIterations = 100
+val model = new LogisticRegressionWithLBFGS().setNumClasses(5).run(train)
+
+val validPredicts =  test.map(p => (model.predict(p.features),p.label))
+
+validPredicts.take(20)
+res37: Array[(Double, Double)] = Array((4.0,2.0), (4.0,4.0), (4.0,4.0), (2.0,4.0), (4.0,4.0), (3.0,3.0), (4.0,4.0), (4.0,4.0), (4.0,4.0), (4.0,4.0), (4.0,4.0), (3.0,3.0), (4.0,4.0), (4.0,4.0), (2.0,2.0), (4.0,4.0), (1.0,0.0), (4.0,4.0), (4.0,3.0), (0.0,0.0))
+
+import org.apache.spark.mllib.evaluation.MulticlassMetrics
+val metrics = new MulticlassMetrics(validPredicts)
+validPredicts.filter(x => x._1 == x._2).count  // 125055
+validPredicts.count                            // 170841
+val accuracy = metrics.accuracy   // 0.7319964177217413
+
+metrics.confusionMatrix
+res40: org.apache.spark.mllib.linalg.Matrix =
+10482.0  1635.0  1060.0  676.0   1983.0
+1635.0   3956.0  1183.0  722.0   1494.0
+999.0    1304.0  5559.0  1970.0  3011.0
+683.0    826.0   1937.0  9475.0  11474.0
+1767.0   1651.0  2788.0  6988.0  95583.0
+
+---- MLlib Maive Bayes regression --------------
+
+import org.apache.spark.mllib.classification.NaiveBayes
+val model = NaiveBayes.train(train)
+
+val validPredicts =  test.map(p => (model.predict(p.features),p.label))
+
+validPredicts.take(20)
+res41: Array[(Double, Double)] = Array((4.0,2.0), (4.0,4.0), (4.0,4.0), (0.0,4.0), (4.0,4.0), (3.0,3.0), (0.0,4.0), (4.0,4.0), (3.0,4.0), (4.0,4.0), (4.0,4.0), (3.0,3.0), (4.0,4.0), (4.0,4.0), (0.0,2.0), (3.0,4.0), (0.0,0.0), (4.0,4.0), (4.0,3.0), (0.0,0.0))
+
+import org.apache.spark.mllib.evaluation.MulticlassMetrics
+val metrics = new MulticlassMetrics(validPredicts)
+validPredicts.filter(x => x._1 == x._2).count  // 109626
+validPredicts.count                            // 170841
+val accuracy = metrics.accuracy   // 0.6416843731891057
+
+metrics.confusionMatrix
+res44: org.apache.spark.mllib.linalg.Matrix =
+9587.0  2875.0  1343.0  713.0    1318.0
+1653.0  3665.0  1659.0  963.0    1050.0
+1487.0  1829.0  4967.0  2621.0   1939.0
+1366.0  1381.0  2793.0  10575.0  8280.0
+4230.0  3240.0  4869.0  15606.0  80832.0
